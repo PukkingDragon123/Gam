@@ -1,101 +1,101 @@
-// Direction sources. The game loop only calls getDirection(); whether that
-// comes from a tracked head or the arrow keys is an implementation detail.
+// input.js — unify hand-gesture intent + keyboard into per-frame controls.
+// `mergeControls` is pure (edge detection lives in an explicit state object) so
+// it can be unit-tested; `createInput` wraps it with mutable state + DOM events.
+import { NO_HAND } from './gestures.js';
 
-import { HeadTracker } from './tracking.js';
+export function initEdgeState() {
+  return { jump: false, boost: false, fist: false, lastSteerSign: 1 };
+}
 
-const KEY_MAP = {
-  ArrowUp: 'up',
-  ArrowDown: 'down',
-  ArrowLeft: 'left',
-  ArrowRight: 'right',
-  w: 'up',
-  s: 'down',
-  a: 'left',
-  d: 'right',
-  W: 'up',
-  S: 'down',
-  A: 'left',
-  D: 'right',
-};
+export function emptyKeys() {
+  return { left: false, right: false, up: false, down: false, boost: false, sharpLeft: false, sharpRight: false };
+}
 
-/** Keyboard fallback — fully offline, great for testing. */
-export class KeyboardSource {
-  constructor() {
-    this.held = 'center';
-    this.mode = 'keyboard';
-    this._down = (e) => {
-      const dir = KEY_MAP[e.key];
-      if (dir) {
-        this.held = dir;
-        e.preventDefault();
-      }
-    };
-    this._up = (e) => {
-      const dir = KEY_MAP[e.key];
-      if (dir && this.held === dir) this.held = 'center';
-    };
+// prev: edge state · hand: gesture intent · keys: keyboard booleans.
+// Returns { control, next } — `control` is what the game acts on this frame,
+// `next` is the edge state to feed back in next frame.
+export function mergeControls(prev, hand, keys) {
+  const steerKey = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+  const steer = steerKey !== 0 ? steerKey : hand.present ? hand.steer : 0;
+  const steerSign = steer > 0.15 ? 1 : steer < -0.15 ? -1 : prev.lastSteerSign;
+
+  const jumpSrc = (hand.present && hand.vertical === 'up') || keys.up;
+  const crouch = (hand.present && hand.vertical === 'down') || keys.down;
+  const boostSrc = (hand.present && hand.openPalm) || keys.boost;
+  const fistSrc = (hand.present && hand.fist) || keys.sharpLeft || keys.sharpRight;
+
+  const jump = jumpSrc && !prev.jump;
+  const boost = boostSrc && !prev.boost;
+  let sharpTurn = 0;
+  if (fistSrc && !prev.fist) {
+    sharpTurn = keys.sharpLeft ? -1 : keys.sharpRight ? 1 : steerSign;
   }
 
-  async start() {
-    window.addEventListener('keydown', this._down);
-    window.addEventListener('keyup', this._up);
-  }
+  return {
+    control: { steer, jump, crouch, boost, sharpTurn },
+    next: { jump: jumpSrc, boost: boostSrc, fist: fistSrc, lastSteerSign: steerSign },
+  };
+}
 
-  getDirection() {
-    return this.held;
-  }
-
-  getState() {
-    return { hasFace: true, direction: this.held };
-  }
-
-  // No-ops so the camera and keyboard sources share an interface.
-  calibrate() {}
-
-  stop() {
-    window.removeEventListener('keydown', this._down);
-    window.removeEventListener('keyup', this._up);
+// Maps a KeyboardEvent.code to one of our logical key flags.
+export function codeToKey(code) {
+  switch (code) {
+    case 'ArrowLeft':
+    case 'KeyA':
+      return 'left';
+    case 'ArrowRight':
+    case 'KeyD':
+      return 'right';
+    case 'ArrowUp':
+    case 'KeyW':
+    case 'Space':
+      return 'up';
+    case 'ArrowDown':
+    case 'KeyS':
+      return 'down';
+    case 'ShiftLeft':
+    case 'ShiftRight':
+      return 'boost';
+    case 'KeyQ':
+      return 'sharpLeft';
+    case 'KeyE':
+      return 'sharpRight';
+    default:
+      return null;
   }
 }
 
-/** Camera source — thin adapter over HeadTracker. */
-export class CameraSource {
-  constructor() {
-    this.tracker = new HeadTracker();
-    this.mode = 'camera';
-  }
+export function createInput() {
+  let edge = initEdgeState();
+  let hand = NO_HAND;
+  const keys = emptyKeys();
 
-  async start(displayEl) {
-    await this.tracker.start();
-    if (displayEl) this.tracker.attachDisplay(displayEl);
-  }
+  const onKey = (down) => (e) => {
+    const k = codeToKey(e.code);
+    if (!k) return;
+    if (e.code === 'Space') e.preventDefault();
+    keys[k] = down;
+  };
+  const kd = onKey(true);
+  const ku = onKey(false);
 
-  attachDisplay(displayEl) {
-    this.tracker.attachDisplay(displayEl);
-  }
-
-  set onFrame(cb) {
-    this.tracker.onFrame = cb;
-  }
-  get onFrame() {
-    return this.tracker.onFrame;
-  }
-
-  getDirection() {
-    return this.tracker.getDirection();
-  }
-
-  getState() {
-    return this.tracker.getState();
-  }
-
-  calibrate() {
-    this.tracker.calibrate();
-  }
-
-  stop() {
-    this.tracker.stop();
-  }
+  return {
+    setHand(h) {
+      hand = h || NO_HAND;
+    },
+    sample() {
+      const { control, next } = mergeControls(edge, hand, keys);
+      edge = next;
+      return control;
+    },
+    attach(target = window) {
+      target.addEventListener('keydown', kd);
+      target.addEventListener('keyup', ku);
+    },
+    detach(target = window) {
+      target.removeEventListener('keydown', kd);
+      target.removeEventListener('keyup', ku);
+    },
+    _keys: keys,
+  };
 }
-
-export { HeadTracker };

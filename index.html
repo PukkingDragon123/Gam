@@ -2,191 +2,152 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b0c1a" />
-    <title>Shadow Boxing Ultimate</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0a86c9" />
+    <title>Brasilian Skies — a surf tribute to Takanaka</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Quicksand:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
   </head>
   <body>
-    <div id="shake-root">
-      <div id="app">
-      <!-- ============ MAIN MENU ============ -->
+    <!-- 3D stage -->
+    <canvas id="scene"></canvas>
+
+    <!-- Always-rendered processing video (kept onscreen but invisible so the
+         browser never stops decoding it). Previews are drawn onto canvases. -->
+    <video id="cam" autoplay playsinline muted></video>
+
+    <!-- In-game HUD (shown only while surfing) -->
+    <div id="hud" hidden>
+      <div class="hud-top">
+        <div class="hud-score">
+          <span class="hud-label">SCORE</span>
+          <strong id="hud-score">0</strong>
+        </div>
+        <div class="hud-mid">
+          <span id="hud-phase" class="phase-pill">Noon</span>
+          <span id="hud-mult" class="mult-pill">×1.00</span>
+        </div>
+        <button id="btn-pause" class="icon-btn" title="Pause">⏸</button>
+      </div>
+
+      <div class="hud-bottom">
+        <canvas id="cam-hud" width="160" height="120"></canvas>
+        <div id="boost-meter" class="boost-meter"><span></span></div>
+      </div>
+
+      <div id="flash" class="flash"></div>
+      <div id="moment" class="moment"></div>
+    </div>
+
+    <!-- Overlay screens -->
+    <div id="screens">
+      <!-- MENU -->
       <section id="screen-menu" class="screen is-active">
-        <div class="logo">
-          <h1>SHADOW<span>BOXING</span></h1>
-          <p class="tagline">ULTIMATE — read, react, predict.</p>
+        <div class="hero">
+          <h1>Brasilian <span>Skies</span></h1>
+          <p class="tagline">A cozy hand-surf tribute to Masayoshi Takanaka's 1978 album.</p>
         </div>
-
-        <div class="profile-card" id="profile-card">
-          <div class="profile-rank">
-            <span class="rank-label">RANK</span>
-            <strong id="profile-rank-name">Rookie</strong>
-          </div>
-          <div class="xp-wrap">
-            <div class="xp-bar"><div class="xp-fill" id="xp-fill"></div></div>
-            <span class="xp-text" id="xp-text">0 XP</span>
-          </div>
-          <div class="profile-stats" id="profile-stats"></div>
+        <div class="save-card">
+          <div><span>BEST</span><strong id="menu-best">0</strong></div>
+          <div><span>ISLANDS</span><strong id="menu-islands">0 / 6</strong></div>
         </div>
-
         <div class="menu-buttons">
-          <button class="btn btn-primary" id="btn-play">▶ Play Ranked</button>
-          <button class="btn" id="btn-how">How to Play</button>
-          <button class="btn btn-ghost" id="btn-reset">Reset Progress</button>
+          <button class="btn btn-primary" id="btn-play-cam">📷 Surf with your hand</button>
+          <button class="btn" id="btn-play-keys">⌨️ Surf with keyboard</button>
+          <button class="btn btn-ghost" id="btn-how">How to play</button>
+          <button class="btn btn-ghost" id="btn-gallery">🏝️ Island gallery</button>
         </div>
+        <p class="fineprint">Fan project · original music · not affiliated with the artist.</p>
       </section>
 
-      <!-- ============ HOW TO PLAY ============ -->
+      <!-- HOW TO PLAY -->
       <section id="screen-how" class="screen">
-        <h2>How to Play</h2>
+        <h2>How to play</h2>
         <div class="how-grid">
           <div class="how-card">
-            <h3>The Duel</h3>
-            <p>
-              You and your opponent trade turns. The <b>attacker</b> commits a
-              direction. The <b>defender</b> moves their head.
-            </p>
-            <p><b class="hit">Same direction → HIT.</b> <b class="dodge">Different → DODGE.</b></p>
-            <p>It's a four-way mind game: don't be where the punch lands.</p>
+            <h3>✋ Hand controls</h3>
+            <ul>
+              <li><b>Move hand left / right</b> → steer the board</li>
+              <li><b>Raise hand</b> → jump over waves</li>
+              <li><b>Lower hand</b> → crouch under banners</li>
+              <li><b>Open palm</b> → speed boost</li>
+              <li><b>Closed fist</b> → sharp turn</li>
+            </ul>
+            <p class="hint">No webcam? Keyboard works too — see below.</p>
           </div>
           <div class="how-card">
-            <h3>Controls</h3>
-            <p><b>Camera:</b> move your head up / down / left / right.</p>
-            <p><b>Keyboard:</b> arrow keys or W A S D.</p>
-            <p>Hold a direction to lock it in. Stay centered and you'll get hit.</p>
+            <h3>⌨️ Keyboard</h3>
+            <ul>
+              <li><b>← →</b> / A D — steer</li>
+              <li><b>↑</b> / W / Space — jump</li>
+              <li><b>↓</b> / S — crouch</li>
+              <li><b>Shift</b> — boost</li>
+              <li><b>Q / E</b> — sharp turn left / right</li>
+            </ul>
           </div>
           <div class="how-card">
-            <h3>Abilities</h3>
-            <ul id="how-abilities"></ul>
+            <h3>🌊 The vibe</h3>
+            <ul>
+              <li>Collect floating <b>music notes</b>.</li>
+              <li>Thread <b>glowing rings</b> to build a combo.</li>
+              <li>Find <b>hidden islands</b> for fan facts.</li>
+              <li>Surf a full <b>day → night</b> cycle.</li>
+              <li>It's cozy: wipeouts cost combo, never your run.</li>
+            </ul>
           </div>
         </div>
         <button class="btn" data-goto="menu">← Back</button>
       </section>
 
-      <!-- ============ SETUP ============ -->
-      <section id="screen-setup" class="screen">
-        <h2>Match Setup</h2>
-
-        <div class="setup-block">
-          <h3>Input</h3>
-          <div class="choice-row" id="mode-row">
-            <button class="choice" data-mode="camera">📷 Camera (head tracking)</button>
-            <button class="choice" data-mode="keyboard">⌨️ Keyboard</button>
-          </div>
-          <p class="hint" id="mode-hint"></p>
-        </div>
-
-        <div class="setup-block">
-          <h3>Ability <small>(choose one)</small></h3>
-          <div class="choice-row wrap" id="ability-row"></div>
-        </div>
-
-        <div class="setup-block">
-          <h3>Arena</h3>
-          <div class="choice-row wrap" id="arena-row"></div>
-        </div>
-
-        <div class="setup-actions">
-          <button class="btn" data-goto="menu">← Back</button>
-          <button class="btn btn-primary" id="btn-start" disabled>Start Match</button>
-        </div>
-      </section>
-
-      <!-- ============ CALIBRATE (camera only) ============ -->
+      <!-- CALIBRATE -->
       <section id="screen-calibrate" class="screen">
-        <h2>Calibrate</h2>
+        <h2>Calibrate your hand</h2>
         <p class="hint">
-          Face the camera, hold your head comfortably centered, then calibrate.
-          During the match, lean / turn your head to dodge.
+          Hold one hand up, comfortably centered in the frame, fingers relaxed.
+          Then calibrate — that becomes your neutral steering position.
         </p>
         <div class="calib-stage">
-          <video id="calib-video" autoplay playsinline muted></video>
-          <div class="calib-reticle" id="calib-reticle"></div>
-          <div class="calib-crosshair"></div>
+          <canvas id="calib-overlay"></canvas>
         </div>
         <p class="calib-status" id="calib-status">Starting camera…</p>
         <div class="setup-actions">
-          <button class="btn" data-goto="setup">← Back</button>
-          <button class="btn btn-primary" id="btn-calibrate" disabled>Calibrate &amp; Fight</button>
+          <button class="btn" data-goto="menu" id="btn-calib-back">← Back</button>
+          <button class="btn btn-primary" id="btn-calibrate" disabled>Calibrate &amp; surf</button>
         </div>
       </section>
 
-      <!-- ============ GAME ============ -->
-      <section id="screen-game" class="screen">
-        <div class="topbar">
-          <div class="fighter-hp left">
-            <span class="fighter-name">You</span>
-            <div class="hearts" id="hp-you"></div>
-          </div>
-          <div class="turn-meta">
-            <span id="rank-pill" class="pill"></span>
-            <span id="turn-counter" class="pill ghost">Turn 1</span>
-          </div>
-          <div class="fighter-hp right">
-            <span class="fighter-name" id="opp-name">Rival</span>
-            <div class="hearts" id="hp-opp"></div>
-          </div>
-        </div>
-
-        <div class="stage" id="stage">
-          <video id="game-video" autoplay playsinline muted></video>
-          <div class="opponent" id="opponent">🥊</div>
-
-          <div class="indicator-pad">
-            <div class="arrow up" data-dir="up">▲</div>
-            <div class="arrow down" data-dir="down">▼</div>
-            <div class="arrow left" data-dir="left">◀</div>
-            <div class="arrow right" data-dir="right">▶</div>
-            <div class="reticle" id="reticle"></div>
-          </div>
-
-          <svg class="timer-ring" id="timer-ring" viewBox="0 0 120 120">
-            <circle class="timer-track" cx="60" cy="60" r="54" />
-            <circle class="timer-prog" id="timer-prog" cx="60" cy="60" r="54" />
-          </svg>
-
-          <div class="banner" id="banner">
-            <span class="banner-role" id="banner-role">READY</span>
-            <span class="banner-sub" id="banner-sub"></span>
-          </div>
-
-          <div class="flash" id="flash"></div>
-        </div>
-
-        <div class="actionbar">
-          <button class="btn ability-btn" id="ability-btn" hidden></button>
-          <span class="action-hint" id="action-hint"></span>
-          <button class="btn btn-ghost" id="btn-quit">Quit</button>
-        </div>
+      <!-- GALLERY -->
+      <section id="screen-gallery" class="screen">
+        <h2>Island gallery</h2>
+        <p class="hint" id="gallery-sub">Surf close to hidden islands to discover fan facts about the album.</p>
+        <div class="gallery-grid" id="gallery-grid"></div>
+        <div class="album-strip" id="album-strip"></div>
+        <button class="btn" data-goto="menu">← Back</button>
       </section>
 
-      <!-- ============ RESULT ============ -->
-      <section id="screen-result" class="screen">
-        <h2 id="result-title">Victory</h2>
-        <p id="result-sub" class="result-sub"></p>
-        <div class="result-stats" id="result-stats"></div>
-        <div class="xp-gain" id="xp-gain"></div>
-        <div class="unlocks" id="unlocks"></div>
+      <!-- PAUSE / SUMMARY -->
+      <section id="screen-pause" class="screen">
+        <h2 id="pause-title">Paused</h2>
+        <div class="result-stats" id="pause-stats"></div>
         <div class="setup-actions">
-          <button class="btn" data-goto="menu">Menu</button>
-          <button class="btn btn-primary" id="btn-rematch">Rematch</button>
+          <button class="btn btn-primary" id="btn-resume">Resume</button>
+          <button class="btn" id="btn-restart">Restart run</button>
+          <button class="btn btn-ghost" id="btn-quit">Quit to menu</button>
         </div>
       </section>
-      </div>
     </div>
-
-    <!-- VFX layers (above everything, never shaken) -->
-    <canvas id="vfx-canvas"></canvas>
-    <div id="onomatopoeia"></div>
-    <div id="aura" aria-hidden="true"><span>ゴ</span><span>ゴ</span><span>ゴ</span><span>ゴ</span></div>
-    <div id="fx-flash" aria-hidden="true"></div>
-    <div id="scanlines" aria-hidden="true"></div>
 
     <script type="module" src="./src/main.js"></script>
   </body>

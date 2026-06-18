@@ -1,587 +1,210 @@
-// Shadow Boxing Ultimate — app entry point and turn orchestration.
-//
-// Flow: menu → setup → (calibrate, camera only) → game loop → result.
-// All game rules live in match.js / rules.js; this file owns flow, timing,
-// input capture and wiring the UI to player decisions.
-
-import { DIRECTIONS, ABILITY, ABILITIES, RANKS, MATCH } from './constants.js';
-import {
-  getProfile,
-  rankForXp,
-  nextRank,
-  unlockedAbilities,
-  unlockedArenas,
-  ARENAS,
-  recordMatch,
-  resetProfile,
-  setSelection,
-} from './progression.js';
-import { Match } from './match.js';
-import { Ai } from './ai.js';
-import { KeyboardSource, CameraSource, HeadTracker } from './input.js';
+// main.js — app entry point. Owns flow (menu → calibrate → surf), the render
+// loop, the camera/keyboard input wiring, and persistence. Game rules live in
+// game.js; this file is about flow and wiring.
+import * as THREE from 'three';
+import { World } from './world.js';
+import { EntityManager } from './entities.js';
+import { GameAudio } from './audio.js';
+import { createInput } from './input.js';
+import { HandTracker } from './hands.js';
+import { Game } from './game.js';
+import { dayPhase, lerpPalette, nightFactor } from './scoring.js';
+import * as progression from './progression.js';
 import * as ui from './ui.js';
-import * as vfx from './vfx.js';
 
-const HUMAN = 0;
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const randDir = () => DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
+const canvas = document.getElementById('scene');
+const world = new World(canvas);
+const entities = new EntityManager(world);
+const audio = new GameAudio();
+const input = createInput();
+let tracker = null;
 
-const state = {
-  profile: null,
-  rank: RANKS[0],
-  mode: null, // 'camera' | 'keyboard'
-  ability: null, // chosen ability id
-  arena: 'dojo',
-  source: null, // KeyboardSource | CameraSource
-  match: null,
-  ai: null,
-  aborted: false,
-  armedAttack: false, // human armed an attack-side ability this turn
-};
+const save = progression.load();
 
-let captureControls = null; // live during an input-capture window
-
-/* ============================ boot ============================ */
-
-function boot() {
-  ui.cacheDom();
-  vfx.initVfx();
-  ui.renderHowAbilities();
-  refreshProfile();
-  wireMenu();
-  wireSetup();
-  wireCalibrate();
-  wireGame();
-  ui.show('menu');
-}
-
-function refreshProfile() {
-  state.profile = getProfile();
-  state.rank = rankForXp(state.profile.xp);
-  ui.renderProfile(state.profile, state.rank, nextRank(state.profile.xp));
-}
-
-/* ============================ menu ============================ */
-
-function wireMenu() {
-  document.querySelector('#btn-play').addEventListener('click', openSetup);
-  document.querySelector('#btn-how').addEventListener('click', () => ui.show('how'));
-  document.querySelector('#btn-reset').addEventListener('click', () => {
-    if (confirm('Reset all progress (XP, ranks and unlocks)?')) {
-      resetProfile();
-      refreshProfile();
-    }
-  });
-  document.querySelectorAll('[data-goto]').forEach((b) =>
-    b.addEventListener('click', () => {
-      if (b.dataset.goto === 'setup') openSetup();
-      else ui.show(b.dataset.goto);
-    })
-  );
-}
-
-/* ============================ setup ============================ */
-
-function openSetup() {
-  refreshProfile();
-  const xp = state.profile.xp;
-  const unlockedAb = unlockedAbilities(xp);
-  ui.buildAbilityChoices(unlockedAb);
-  ui.buildArenaChoices(ARENAS, unlockedArenas(xp), state.profile.selected.arena);
-
-  // Sensible defaults.
-  state.mode = CameraSource && HeadTracker.isSupported() ? 'camera' : 'keyboard';
-  state.ability = unlockedAb[0] ?? null;
-  state.arena = state.profile.selected.arena ?? 'dojo';
-  ui.markSelected('#mode-row', 'mode', state.mode);
-  ui.markSelected('#ability-row', 'ability', state.ability);
-  ui.markSelected('#arena-row', 'arena', state.arena);
-  setModeHint();
-  validateStart();
-  ui.show('setup');
-}
-
-function setModeHint() {
-  const hint = document.querySelector('#mode-hint');
-  if (state.mode === 'camera') {
-    hint.textContent = HeadTracker.isSupported()
-      ? 'Move your head to dodge. You will calibrate before the match.'
-      : '⚠ Camera not available in this browser — use Keyboard.';
-  } else {
-    hint.textContent = 'Use arrow keys or W A S D. Hold a direction to lock it in.';
-  }
-}
-
-function wireSetup() {
-  document.querySelector('#mode-row').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-mode]');
-    if (!btn) return;
-    if (btn.dataset.mode === 'camera' && !HeadTracker.isSupported()) return;
-    state.mode = btn.dataset.mode;
-    ui.markSelected('#mode-row', 'mode', state.mode);
-    setModeHint();
-    validateStart();
-  });
-
-  document.querySelector('#ability-row').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-ability]');
-    if (!btn || btn.disabled) return;
-    state.ability = btn.dataset.ability;
-    ui.markSelected('#ability-row', 'ability', state.ability);
-    validateStart();
-  });
-
-  document.querySelector('#arena-row').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-arena]');
-    if (!btn || btn.disabled) return;
-    state.arena = btn.dataset.arena;
-    setSelection('arena', state.arena);
-    ui.markSelected('#arena-row', 'arena', state.arena);
-  });
-
-  document.querySelector('#btn-start').addEventListener('click', startFromSetup);
-}
-
-function validateStart() {
-  const ok = !!state.mode && !!state.ability;
-  document.querySelector('#btn-start').disabled = !ok;
-}
-
-async function startFromSetup() {
-  if (state.mode === 'keyboard') {
-    state.source = new KeyboardSource();
-    await state.source.start();
-    beginMatch();
-  } else {
-    await enterCalibration();
-  }
-}
-
-/* ============================ calibrate ============================ */
-
-function wireCalibrate() {
-  document.querySelector('#btn-calibrate').addEventListener('click', () => {
-    state.source.calibrate();
-    beginMatch();
-  });
-}
-
-async function enterCalibration() {
-  ui.show('calibrate');
-  const status = document.querySelector('#calib-status');
-  const btn = document.querySelector('#btn-calibrate');
-  const reticle = document.querySelector('#calib-reticle');
-  btn.disabled = true;
-  status.textContent = 'Starting camera…';
-
-  state.source = new CameraSource();
-  try {
-    await state.source.start(document.querySelector('#calib-video'));
-  } catch (err) {
-    status.textContent = '⚠ Could not access camera. Go back and choose Keyboard.';
-    console.error(err);
-    return;
-  }
-  status.textContent = 'Loading face tracking…';
-
-  state.source.onFrame = (st) => {
-    const left = Math.max(4, Math.min(96, 50 + st.offset.dx * 140));
-    const top = Math.max(4, Math.min(96, 50 + st.offset.dy * 140));
-    reticle.style.left = `${left}%`;
-    reticle.style.top = `${top}%`;
-    if (st.hasFace) {
-      btn.disabled = false;
-      status.textContent = 'Face detected — center your head, then calibrate.';
-    } else {
-      status.textContent = 'Looking for your face…';
-    }
-  };
-}
-
-/* ============================ match setup ============================ */
-
-function beginMatch() {
-  state.aborted = false;
-  const xp = state.profile.xp;
-  state.rank = rankForXp(xp);
-  const rankIndex = RANKS.findIndex((r) => r.id === state.rank.id);
-  const skill = Math.min(0.9, 0.45 + rankIndex * 0.09);
-  const aiAbility = pickAiAbility();
-
-  state.match = new Match({
-    p1: { id: 'you', name: 'You', ability: state.ability },
-    p2: { id: 'rival', name: aiName(), ability: aiAbility },
-    defendTimeMs: state.rank.defendTimeMs,
-    attackTimeMs: state.rank.attackTimeMs,
-    startingHp: MATCH.startingHp,
-  });
-  state.ai = new Ai({ skill });
-
-  ui.setArena(state.arena);
-  ui.setCameraVisible(state.mode === 'camera');
-  ui.setOpponentName(state.match.players[1].name);
-  ui.renderHp(humanP(), oppP());
-  ui.clearArrows();
-  ui.showAim(null);
-  ui.setReticleDir('center');
-  ui.timerOff();
-  ui.show('game');
-
-  if (state.mode === 'camera') {
-    state.source.attachDisplay(document.querySelector('#game-video'));
-    state.source.onFrame = (st) => ui.setReticleOffset(st.offset);
-  }
-
-  gameLoop();
-}
-
-function pickAiAbility() {
-  const ids = Object.keys(ABILITIES);
-  return ids[Math.floor(Math.random() * ids.length)];
-}
-
-function aiName() {
-  const names = ['Rival', 'The Phantom', 'Vega', 'Iron Maki', 'Specter', 'Razor'];
-  return names[Math.floor(Math.random() * names.length)];
-}
-
-const humanP = () => state.match.players[HUMAN];
-const oppP = () => state.match.players[1 - HUMAN];
-
-/* ============================ game loop ============================ */
-
-async function gameLoop() {
-  await countdown();
-  while (!state.match.isOver && !state.aborted) {
-    await runTurn();
-    if (state.match.isOver || state.aborted) break;
-    await wait(650);
-  }
-  if (state.aborted) return;
-  endMatch();
-}
-
-async function countdown() {
-  for (const n of ['3', '2', '1', 'FIGHT']) {
-    if (state.aborted) return;
-    ui.setBanner(n, '');
-    if (n === 'FIGHT') {
-      vfx.flash('#46f0ff', 150, 0.5);
-      vfx.impact({ kind: 'dodge', intensity: 0.9, text: 'ファイト!' });
-    } else {
-      vfx.shake(0.12);
-      vfx.speedLines(0.25, '#ffd23d');
-    }
-    await wait(550);
-  }
-}
-
-async function runTurn() {
-  ui.setTurnMeta(state.rank.name, state.match.turnNumber + 1);
-  ui.clearArrows();
-  ui.showAim(null);
-  // Match point: switch on the ゴゴゴ menacing aura when someone is one hit away.
-  vfx.aura(Math.min(humanP().hp, oppP().hp) <= 1);
-  const humanAttacking = state.match.attackerIndex === HUMAN;
-  if (humanAttacking) await humanAttackTurn();
-  else await humanDefendTurn();
-}
-
-/* ---- human attacks, AI defends ---- */
-async function humanAttackTurn() {
-  state.armedAttack = false;
-  ui.setBanner('ATTACK', 'Aim where they WON’T be');
-  ui.setActionHint(hintFor('attack'));
-  setupAbilityButton('attack');
-  await wait(600);
-  if (state.aborted) return;
-
-  ui.timerOn();
-  const res = await captureCommit({
-    timeMs: state.match.attackTimeMs,
-    onTick: ({ remaining, total, dir }) => {
-      ui.timerSet(remaining / total);
-      if (state.mode === 'keyboard') ui.setReticleDir(dir);
-      ui.showAim(dir === 'center' ? null : dir);
-    },
-  });
-  ui.timerOff();
-  if (res.aborted) return;
-
-  const attackDir = res.dir || randDir();
-  ui.showAim(attackDir);
-  ui.setAbilityButton({ visible: false });
-  vfx.shake(0.12);
-  vfx.speedLines(0.3, '#46f0ff');
-
-  const ctx = state.match.beginTurn({
-    attackDir,
-    attackerAbilities: state.armedAttack ? [state.ability] : [],
-  });
-
-  const aiDef = state.ai.decideDefense(ctx, {
-    canUseAbility: oppP().abilityUses > 0,
-    ability: oppP().ability,
-  });
-  for (const id of aiDef.abilities) state.match.useActiveDefenderAbility(id);
-
-  ui.setBanner('ATTACK', res.dir ? '' : 'Wild swing!');
-  await wait(250);
-  ui.opponentLunge(aiDef.dir);
-
-  const summary = state.match.resolveTurn(aiDef.dir);
-  state.ai.observeHumanAttack(attackDir);
-  await showResolution(summary, { attackerIsHuman: true });
-}
-
-/* ---- AI attacks, human defends ---- */
-async function humanDefendTurn() {
-  const aiAtk = state.ai.decideAttack({
-    canUseAbility: oppP().abilityUses > 0,
-    ability: oppP().ability,
-    hp: oppP().hp,
-    oppHp: humanP().hp,
-  });
-
-  const ctx = state.match.beginTurn({
-    attackDir: aiAtk.dir,
-    attackerAbilities: aiAtk.abilities,
-  });
-
-  ui.setBanner('DEFEND', defendSub(ctx));
-  ui.setActionHint(hintFor('defend'));
-  ui.clearArrows();
-  ui.opponentLunge(null);
-  setupAbilityButton('defend');
-  await wait(600);
-  if (state.aborted) return;
-
-  // Reveal the telegraph (already distorted by blind/reverse inside ctx).
-  ui.showTelegraph(ctx.indicatorDir);
-  ui.timerOn(true);
-  vfx.shake(0.16);
-  if (ctx.blind) vfx.speedLines(0.55, '#b450ff');
-  else vfx.speedLines(0.4, '#ff688a');
-
-  const startTime = ctx.defendTimeMs;
-  const res = await captureCommit({
-    timeMs: startTime,
-    onTick: ({ remaining, total, dir }) => {
-      ui.timerSet(remaining / total);
-      if (state.mode === 'keyboard') ui.setReticleDir(dir);
-    },
-  });
-  ui.timerOff();
-  if (res.aborted) return;
-
-  ui.setAbilityButton({ visible: false });
-  const defendDir = res.dir; // may be null if they never moved
-  const summary = state.match.resolveTurn(defendDir);
-  state.ai.observeHumanDodge(defendDir);
-
-  // Reveal the *true* attack so the player learns from blind/reverse turns.
-  ui.showTelegraph(ctx.attackDir);
-  ui.opponentLunge(ctx.attackDir);
-  await showResolution(summary, { attackerIsHuman: false });
-}
-
-function defendSub(ctx) {
-  if (ctx.blind) return 'BLINDED — no telegraph!';
-  if (ctx.appliedAbilities.includes(ABILITY.FREEZE)) return 'FROZEN — react fast!';
-  return 'Move away from the punch';
-}
-
-async function showResolution(summary, { attackerIsHuman }) {
-  const isHit = summary.result === 'hit';
-  const youLandedHit = isHit && attackerIsHuman;
-  const ko = summary.gameOver;
-
-  if (isHit) {
-    if (youLandedHit) ui.opponentHurt();
-    if (ko) {
-      // Finisher: big gold impact frame + long freeze, JoJo style.
-      ui.flashResult('hit', youLandedHit ? 'K.O.!' : 'DOWN!');
-      vfx.aura(false);
-      await vfx.impact({ kind: 'ko', intensity: 1.7, text: 'K.O.!!' });
-    } else {
-      ui.flashResult('hit', youLandedHit ? 'HIT!' : 'OUCH!');
-      await vfx.impact({
-        kind: youLandedHit ? 'hit' : 'hurt',
-        intensity: youLandedHit ? 1.15 : 1,
-      });
-    }
-  } else {
-    // dodge (you slipped it) or block (your punch missed) — quick, no freeze.
-    ui.flashResult('dodge', attackerIsHuman ? 'BLOCKED' : 'DODGE!');
-    vfx.impact({ kind: attackerIsHuman ? 'miss' : 'dodge', intensity: 0.85 });
-  }
-
-  ui.renderHp(humanP(), oppP());
-  await wait(ko ? 700 : 480);
-}
-
-/* ---- ability button wiring ---- */
-function setupAbilityButton(phase) {
-  const def = ABILITIES[state.ability];
-  const human = humanP();
-  const relevant = def && def.side === phase && human.abilityUses > 0;
-  if (!relevant) {
-    ui.setAbilityButton({ visible: false });
-    return;
-  }
-  ui.setAbilityButton({
-    visible: true,
-    enabled: true,
-    label: `${def.icon} ${def.name} (${human.abilityUses})`,
-  });
-}
-
-function onAbilityClick() {
-  const def = ABILITIES[state.ability];
-  if (!def) return;
-  if (def.side === 'attack') {
-    if (state.armedAttack) return;
-    state.armedAttack = true;
-    ui.setAbilityButton({ visible: true, enabled: false, label: `${def.icon} Armed ✓` });
-  } else if (def.side === 'defend') {
-    // Focus: extend the live reaction window immediately.
-    const before = state.match.activeContext?.defendTimeMs ?? 0;
-    const ctx = state.match.useActiveDefenderAbility(state.ability);
-    if (ctx && captureControls) {
-      captureControls.extend(ctx.defendTimeMs - before);
-      const left = humanP().abilityUses;
-      ui.setAbilityButton({
-        visible: true,
-        enabled: left > 0,
-        label: left > 0 ? `${def.icon} ${def.name} (${left})` : `${def.icon} Used`,
-      });
-    }
-  }
-}
-
-/* ============================ input capture ============================ */
-
-/**
- * Resolve when the player locks a direction (held for lockMs) or the timer
- * runs out. Returns the committed direction (last non-center seen).
- * captureControls.extend(ms) lets Focus grow the window mid-flight.
- */
-function captureCommit({ timeMs, lockMs = 200, onTick }) {
-  return new Promise((resolve) => {
-    const start = performance.now();
-    let end = start + timeMs;
-    let heldDir = 'center';
-    let heldSince = start;
-    let lastNonCenter = null;
-    let raf = 0;
-
-    const finish = (result) => {
-      cancelAnimationFrame(raf);
-      captureControls = null;
-      resolve(result);
-    };
-    captureControls = {
-      extend: (ms) => {
-        end += ms;
-      },
-      cancel: () => finish({ aborted: true }),
-    };
-
-    const step = (now) => {
-      if (state.aborted) return finish({ aborted: true });
-      const remaining = end - now;
-      const total = end - start;
-      const dir = state.source.getDirection();
-
-      if (dir && dir !== 'center') {
-        lastNonCenter = dir;
-        if (dir === heldDir) {
-          if (now - heldSince >= lockMs) {
-            if (onTick) onTick({ remaining, total, dir });
-            return finish({ dir });
-          }
-        } else {
-          heldDir = dir;
-          heldSince = now;
-        }
+const game = new Game({
+  world,
+  entities,
+  audio,
+  input,
+  save,
+  hooks: {
+    flash: (t, kind) => ui.flash(t, kind),
+    moment: (t) => ui.moment(t),
+    onDiscover: (island, isNew) => {
+      if (isNew) {
+        ui.flash('NEW ISLAND', 'island');
+        ui.moment(`Discovered ${island.name}! ${island.art}`);
+        progression.save(save);
       } else {
-        heldDir = 'center';
+        ui.moment(`${island.name} ${island.art}`);
       }
+    },
+  },
+});
 
-      if (onTick) onTick({ remaining: Math.max(0, remaining), total, dir });
-      if (remaining <= 0) return finish({ dir: lastNonCenter, timedOut: true });
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-  });
+const app = { mode: 'keyboard', running: false, paused: false, calibrating: false, menuClock: 30 };
+const camHud = document.getElementById('cam-hud');
+const calibOverlay = document.getElementById('calib-overlay');
+const camVideo = document.getElementById('cam');
+
+input.attach(window);
+ui.setMenuStats(save);
+ui.showScreen('menu');
+
+// ───────────────────────── flow ─────────────────────────
+async function ensureAudio() {
+  try {
+    await audio.start();
+  } catch {
+    /* no audio context — game still runs silently */
+  }
 }
 
-/* ============================ result / quit ============================ */
+async function goCalibrate() {
+  ui.showScreen('calibrate');
+  ui.setCalibStatus('Starting camera…');
+  ui.setCalibrateEnabled(false);
+  app.calibrating = true;
+  tracker = new HandTracker();
+  try {
+    await tracker.start(camVideo);
+    ui.setCalibStatus('Show one hand, centered. Then calibrate.');
+  } catch (err) {
+    ui.setCalibStatus('Camera unavailable — go back and try keyboard instead. (' + (err && err.name ? err.name : 'error') + ')');
+    tracker = null;
+  }
+}
 
-function wireGame() {
-  document.querySelector('#ability-btn').addEventListener('click', onAbilityClick);
-  document.querySelector('#btn-quit').addEventListener('click', quitMatch);
-  document.querySelector('#btn-rematch').addEventListener('click', () => {
-    if (state.mode === 'keyboard') {
-      state.source = new KeyboardSource();
-      state.source.start();
-      beginMatch();
-    } else {
-      // Camera is still running from before — just restart the match.
-      beginMatch();
+function calibrateAndPlay() {
+  if (!tracker) return;
+  if (!tracker.calibrate()) {
+    ui.setCalibStatus('No hand detected yet — hold your hand up and try again.');
+    return;
+  }
+  startRun('camera');
+}
+
+async function startRun(mode) {
+  await ensureAudio();
+  app.mode = mode;
+  app.calibrating = false;
+  app.paused = false;
+  if (mode === 'keyboard' && tracker) {
+    tracker.stop();
+    tracker = null;
+  }
+  camHud.style.display = mode === 'camera' ? 'block' : 'none';
+  entities.clear();
+  game.start();
+  app.running = true;
+  ui.hideScreens();
+  ui.showHud(true);
+}
+
+function pauseRun() {
+  if (!app.running || app.paused) return;
+  app.paused = true;
+  ui.renderPause(game._hud(), save, true);
+  ui.showScreen('pause');
+}
+
+function resumeRun() {
+  app.paused = false;
+  ui.hideScreens();
+}
+
+function endRun(toMenu) {
+  if (app.running) {
+    progression.recordRun(save, game.score.score, game.score.bestMultiplier);
+    progression.save(save);
+  }
+  app.running = false;
+  app.paused = false;
+  game.stop();
+  ui.showHud(false);
+  if (toMenu) {
+    if (tracker) {
+      tracker.stop();
+      tracker = null;
     }
+    ui.setMenuStats(save);
+    ui.showScreen('menu');
+  }
+}
+
+// ───────────────────────── buttons ─────────────────────────
+document.getElementById('btn-play-cam').addEventListener('click', goCalibrate);
+document.getElementById('btn-play-keys').addEventListener('click', () => startRun('keyboard'));
+document.getElementById('btn-how').addEventListener('click', () => ui.showScreen('how'));
+document.getElementById('btn-gallery').addEventListener('click', () => {
+  ui.renderGallery(save);
+  ui.showScreen('gallery');
+});
+document.getElementById('btn-calibrate').addEventListener('click', calibrateAndPlay);
+document.getElementById('btn-pause').addEventListener('click', pauseRun);
+document.getElementById('btn-resume').addEventListener('click', resumeRun);
+document.getElementById('btn-restart').addEventListener('click', () => {
+  entities.clear();
+  game.start();
+  app.paused = false;
+  ui.hideScreens();
+});
+document.getElementById('btn-quit').addEventListener('click', () => endRun(true));
+
+for (const el of document.querySelectorAll('[data-goto]')) {
+  el.addEventListener('click', () => {
+    const dest = el.getAttribute('data-goto');
+    if (dest === 'menu' && app.calibrating && tracker) {
+      tracker.stop();
+      tracker = null;
+      app.calibrating = false;
+    }
+    ui.setMenuStats(save);
+    ui.showScreen(dest);
   });
 }
 
-function quitMatch() {
-  state.aborted = true;
-  if (captureControls) captureControls.cancel();
-  teardownSource();
-  ui.timerOff();
-  vfx.aura(false);
-  refreshProfile();
-  ui.show('menu');
-}
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' || e.code === 'KeyP') {
+    if (app.running && !app.paused) pauseRun();
+    else if (app.running && app.paused) resumeRun();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && app.running && !app.paused) pauseRun();
+});
 
-function teardownSource() {
-  if (state.source) {
-    try {
-      state.source.stop();
-    } catch {
-      /* ignore */
+// ───────────────────────── render loop ─────────────────────────
+let last = performance.now();
+function frame(now) {
+  const dt = (now - last) / 1000;
+  last = now;
+
+  // feed the tracker (camera mode / calibration)
+  if (tracker && tracker.ready) {
+    const intent = tracker.update();
+    input.setHand(intent);
+    if (app.calibrating) {
+      ui.drawCalibOverlay(calibOverlay, camVideo, tracker.lastLandmarks);
+      ui.setCalibrateEnabled(!!tracker.lastLandmarks);
+      if (tracker.lastLandmarks) ui.setCalibStatus('Hand detected — calibrate when ready ✋');
+    } else if (app.running && app.mode === 'camera') {
+      ui.drawCamHud(camHud, camVideo);
     }
   }
-  state.source = null;
-}
 
-function endMatch() {
-  vfx.aura(false);
-  const you = humanP();
-  const won = state.match.winner === you;
-  const summaryUnlocks = recordMatch({
-    won,
-    hitsLanded: you.hitsLanded,
-    dodges: you.dodges,
-  });
-
-  // Camera can keep running for a rematch; keyboard source is recreated.
-  if (state.mode === 'keyboard') teardownSource();
-
-  refreshProfile();
-  ui.renderResult({ won, you, summaryUnlocks, xpGained: summaryUnlocks.gained });
-  ui.show('result');
-}
-
-/* ---- misc copy ---- */
-function hintFor(phase) {
-  if (phase === 'attack') {
-    return state.mode === 'camera'
-      ? 'Lean your head toward the direction you want to punch.'
-      : 'Press a direction to punch — same direction as their dodge = HIT.';
+  if (app.running && !app.paused) {
+    const hud = game.tick(dt);
+    ui.setHud(hud);
+  } else {
+    // idle ambiance: keep the ocean alive behind the menus, slow day/night
+    world.update(dt);
+    app.menuClock += dt;
+    const phase = dayPhase(app.menuClock, 90);
+    world.setPalette(lerpPalette(phase), nightFactor(phase), phase);
   }
-  return state.mode === 'camera'
-    ? 'Move your head AWAY from the incoming punch.'
-    : 'Press a direction other than the punch to dodge.';
-}
 
-boot();
+  world.render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);

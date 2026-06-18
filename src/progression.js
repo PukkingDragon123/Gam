@@ -1,165 +1,63 @@
-// Player progression: XP, ability/arena/cosmetic unlocks. Persisted to
-// localStorage in the browser; falls back to an in-memory store elsewhere.
+// progression.js — persist discovered hidden islands + best scores.
+// Storage access is guarded so the module is safe to import under node.
+import { ISLANDS } from './config.js';
 
-import { ABILITY, RANKS, XP } from './constants.js';
+const STORAGE_KEY = 'brasilian-skies.save.v1';
 
-const STORAGE_KEY = 'sbu.profile.v1';
-
-/** Abilities available from the very start; the rest unlock with XP. */
-const STARTING_ABILITIES = [ABILITY.BLIND, ABILITY.FOCUS];
-
-/** XP thresholds at which each locked ability becomes available. */
-export const ABILITY_UNLOCKS = [
-  { id: ABILITY.FREEZE, minXp: 80, name: 'Freeze' },
-  { id: ABILITY.REVERSE, minXp: 220, name: 'Reverse' },
-  { id: ABILITY.DOUBLE, minXp: 500, name: 'Double Turn' },
-];
-
-/** Arenas (background themes) unlocked by XP. */
-export const ARENAS = [
-  { id: 'dojo', name: 'Neon Dojo', minXp: 0 },
-  { id: 'rooftop', name: 'Rooftop', minXp: 120 },
-  { id: 'arena', name: 'Title Arena', minXp: 350 },
-  { id: 'void', name: 'The Void', minXp: 900 },
-];
-
-/** Cosmetic glove trails unlocked by XP. */
-export const COSMETICS = [
-  { id: 'classic', name: 'Classic', minXp: 0 },
-  { id: 'ember', name: 'Ember Trail', minXp: 200 },
-  { id: 'frost', name: 'Frost Trail', minXp: 450 },
-  { id: 'gold', name: 'Champion Gold', minXp: 1200 },
-];
-
-const _memory = { value: null };
-
-function read() {
-  if (_memory.value) return _memory.value;
+function storage() {
   try {
-    if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        _memory.value = JSON.parse(raw);
-        return _memory.value;
-      }
-    }
+    if (typeof localStorage !== 'undefined') return localStorage;
   } catch {
-    /* ignore corrupt storage */
+    /* sandboxed / disabled */
   }
-  _memory.value = { xp: 0, matches: 0, wins: 0, selected: { arena: 'dojo', cosmetic: 'classic' } };
-  return _memory.value;
+  return null;
 }
 
-function write(profile) {
-  _memory.value = profile;
+export function defaultSave() {
+  return { discovered: {}, highScore: 0, plays: 0, bestMultiplier: 1 };
+}
+
+export function load() {
+  const s = storage();
+  if (!s) return defaultSave();
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-    }
+    const raw = s.getItem(STORAGE_KEY);
+    if (!raw) return defaultSave();
+    return { ...defaultSave(), ...JSON.parse(raw) };
   } catch {
-    /* storage may be unavailable (private mode) — memory still holds */
+    return defaultSave();
   }
 }
 
-export function getProfile() {
-  return { ...read() };
-}
-
-/** Current rank object based on XP. */
-export function rankForXp(xp) {
-  let current = RANKS[0];
-  for (const r of RANKS) if (xp >= r.minXp) current = r;
-  return current;
-}
-
-/** Next rank object, or null at the top. */
-export function nextRank(xp) {
-  const idx = RANKS.findIndex((r) => r.id === rankForXp(xp).id);
-  return RANKS[idx + 1] ?? null;
-}
-
-/** List of unlocked ability ids for the given XP. */
-export function unlockedAbilities(xp) {
-  const unlocked = [...STARTING_ABILITIES];
-  for (const a of ABILITY_UNLOCKS) if (xp >= a.minXp) unlocked.push(a.id);
-  return unlocked;
-}
-
-function unlockedByXp(list, xp) {
-  return list.filter((item) => xp >= item.minXp).map((item) => item.id);
-}
-
-export function unlockedArenas(xp) {
-  return unlockedByXp(ARENAS, xp);
-}
-
-export function unlockedCosmetics(xp) {
-  return unlockedByXp(COSMETICS, xp);
-}
-
-/**
- * Compute XP earned for a finished match.
- * @param {{ won: boolean, hitsLanded: number, dodges: number }} stats
- */
-export function xpForMatch({ won, hitsLanded, dodges }) {
-  return (
-    XP.perMatch +
-    hitsLanded * XP.perHitLanded +
-    dodges * XP.perDodge +
-    (won ? XP.winBonus : 0)
-  );
-}
-
-/**
- * Record a completed match. Returns a summary including any new unlocks so the
- * UI can celebrate them.
- * @param {{ won: boolean, hitsLanded: number, dodges: number }} stats
- */
-export function recordMatch(stats) {
-  const profile = read();
-  const before = {
-    abilities: unlockedAbilities(profile.xp),
-    arenas: unlockedArenas(profile.xp),
-    cosmetics: unlockedCosmetics(profile.xp),
-    rank: rankForXp(profile.xp),
-  };
-
-  const gained = xpForMatch(stats);
-  profile.xp += gained;
-  profile.matches += 1;
-  if (stats.won) profile.wins += 1;
-  write(profile);
-
-  const after = {
-    abilities: unlockedAbilities(profile.xp),
-    arenas: unlockedArenas(profile.xp),
-    cosmetics: unlockedCosmetics(profile.xp),
-    rank: rankForXp(profile.xp),
-  };
-
-  return {
-    gained,
-    totalXp: profile.xp,
-    rankedUp: before.rank.id !== after.rank.id ? after.rank : null,
-    newAbilities: after.abilities.filter((id) => !before.abilities.includes(id)),
-    newArenas: after.arenas.filter((id) => !before.arenas.includes(id)),
-    newCosmetics: after.cosmetics.filter((id) => !before.cosmetics.includes(id)),
-  };
-}
-
-export function setSelection(key, value) {
-  const profile = read();
-  profile.selected = { ...profile.selected, [key]: value };
-  write(profile);
-}
-
-/** Wipe the profile (used by the reset button / tests). */
-export function resetProfile() {
-  _memory.value = null;
+export function save(state) {
+  const s = storage();
+  if (!s) return;
   try {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+    s.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
-    /* ignore */
+    /* quota / disabled — non-fatal */
   }
-  return getProfile();
+}
+
+// Marks an island discovered. Returns true only the first time (so the UI can
+// celebrate a genuinely new find).
+export function discoverIsland(state, id) {
+  if (state.discovered[id]) return false;
+  state.discovered[id] = true;
+  return true;
+}
+
+export function isDiscovered(state, id) {
+  return !!state.discovered[id];
+}
+
+export function discoveredCount(state) {
+  return ISLANDS.reduce((n, isl) => n + (state.discovered[isl.id] ? 1 : 0), 0);
+}
+
+export function recordRun(state, finalScore, bestMultiplier) {
+  state.plays += 1;
+  state.highScore = Math.max(state.highScore, Math.round(finalScore));
+  state.bestMultiplier = Math.max(state.bestMultiplier || 1, bestMultiplier || 1);
+  return state;
 }
