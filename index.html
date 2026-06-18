@@ -3,11 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0c1a" />
     <title>Shadow Boxing Ultimate</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="app">
+    <div id="shake-root">
+      <div id="app">
       <!-- ============ MAIN MENU ============ -->
       <section id="screen-menu" class="screen is-active">
         <div class="logo">
@@ -170,7 +178,15 @@
           <button class="btn btn-primary" id="btn-rematch">Rematch</button>
         </div>
       </section>
+      </div>
     </div>
+
+    <!-- VFX layers (above everything, never shaken) -->
+    <canvas id="vfx-canvas"></canvas>
+    <div id="onomatopoeia"></div>
+    <div id="aura" aria-hidden="true"><span>ゴ</span><span>ゴ</span><span>ゴ</span><span>ゴ</span></div>
+    <div id="fx-flash" aria-hidden="true"></div>
+    <div id="scanlines" aria-hidden="true"></div>
 
     <script type="module" src="./src/main.js"></script>
   </body>

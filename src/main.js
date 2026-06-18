@@ -20,6 +20,7 @@ import { Match } from './match.js';
 import { Ai } from './ai.js';
 import { KeyboardSource, CameraSource, HeadTracker } from './input.js';
 import * as ui from './ui.js';
+import * as vfx from './vfx.js';
 
 const HUMAN = 0;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -44,6 +45,7 @@ let captureControls = null; // live during an input-capture window
 
 function boot() {
   ui.cacheDom();
+  vfx.initVfx();
   ui.renderHowAbilities();
   refreshProfile();
   wireMenu();
@@ -263,6 +265,13 @@ async function countdown() {
   for (const n of ['3', '2', '1', 'FIGHT']) {
     if (state.aborted) return;
     ui.setBanner(n, '');
+    if (n === 'FIGHT') {
+      vfx.flash('#46f0ff', 150, 0.5);
+      vfx.impact({ kind: 'dodge', intensity: 0.9, text: 'ファイト!' });
+    } else {
+      vfx.shake(0.12);
+      vfx.speedLines(0.25, '#ffd23d');
+    }
     await wait(550);
   }
 }
@@ -271,6 +280,8 @@ async function runTurn() {
   ui.setTurnMeta(state.rank.name, state.match.turnNumber + 1);
   ui.clearArrows();
   ui.showAim(null);
+  // Match point: switch on the ゴゴゴ menacing aura when someone is one hit away.
+  vfx.aura(Math.min(humanP().hp, oppP().hp) <= 1);
   const humanAttacking = state.match.attackerIndex === HUMAN;
   if (humanAttacking) await humanAttackTurn();
   else await humanDefendTurn();
@@ -300,6 +311,8 @@ async function humanAttackTurn() {
   const attackDir = res.dir || randDir();
   ui.showAim(attackDir);
   ui.setAbilityButton({ visible: false });
+  vfx.shake(0.12);
+  vfx.speedLines(0.3, '#46f0ff');
 
   const ctx = state.match.beginTurn({
     attackDir,
@@ -346,6 +359,9 @@ async function humanDefendTurn() {
   // Reveal the telegraph (already distorted by blind/reverse inside ctx).
   ui.showTelegraph(ctx.indicatorDir);
   ui.timerOn(true);
+  vfx.shake(0.16);
+  if (ctx.blind) vfx.speedLines(0.55, '#b450ff');
+  else vfx.speedLines(0.4, '#ff688a');
 
   const startTime = ctx.defendTimeMs;
   const res = await captureCommit({
@@ -376,18 +392,32 @@ function defendSub(ctx) {
 }
 
 async function showResolution(summary, { attackerIsHuman }) {
-  const youGotHit = summary.result === 'hit' && !attackerIsHuman;
-  const youLandedHit = summary.result === 'hit' && attackerIsHuman;
+  const isHit = summary.result === 'hit';
+  const youLandedHit = isHit && attackerIsHuman;
+  const ko = summary.gameOver;
 
-  if (summary.result === 'hit') {
-    ui.flashResult('hit', youLandedHit ? 'HIT!' : 'OUCH!');
+  if (isHit) {
     if (youLandedHit) ui.opponentHurt();
+    if (ko) {
+      // Finisher: big gold impact frame + long freeze, JoJo style.
+      ui.flashResult('hit', youLandedHit ? 'K.O.!' : 'DOWN!');
+      vfx.aura(false);
+      await vfx.impact({ kind: 'ko', intensity: 1.7, text: 'K.O.!!' });
+    } else {
+      ui.flashResult('hit', youLandedHit ? 'HIT!' : 'OUCH!');
+      await vfx.impact({
+        kind: youLandedHit ? 'hit' : 'hurt',
+        intensity: youLandedHit ? 1.15 : 1,
+      });
+    }
   } else {
+    // dodge (you slipped it) or block (your punch missed) — quick, no freeze.
     ui.flashResult('dodge', attackerIsHuman ? 'BLOCKED' : 'DODGE!');
+    vfx.impact({ kind: attackerIsHuman ? 'miss' : 'dodge', intensity: 0.85 });
   }
+
   ui.renderHp(humanP(), oppP());
-  await wait(750);
-  void youGotHit;
+  await wait(ko ? 700 : 480);
 }
 
 /* ---- ability button wiring ---- */
@@ -508,6 +538,7 @@ function quitMatch() {
   if (captureControls) captureControls.cancel();
   teardownSource();
   ui.timerOff();
+  vfx.aura(false);
   refreshProfile();
   ui.show('menu');
 }
@@ -524,6 +555,7 @@ function teardownSource() {
 }
 
 function endMatch() {
+  vfx.aura(false);
   const you = humanP();
   const won = state.match.winner === you;
   const summaryUnlocks = recordMatch({
