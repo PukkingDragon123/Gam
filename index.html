@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shadow Boxing Ultimate</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- ============ MAIN MENU ============ -->
+      <section id="screen-menu" class="screen is-active">
+        <div class="logo">
+          <h1>SHADOW<span>BOXING</span></h1>
+          <p class="tagline">ULTIMATE — read, react, predict.</p>
+        </div>
+
+        <div class="profile-card" id="profile-card">
+          <div class="profile-rank">
+            <span class="rank-label">RANK</span>
+            <strong id="profile-rank-name">Rookie</strong>
+          </div>
+          <div class="xp-wrap">
+            <div class="xp-bar"><div class="xp-fill" id="xp-fill"></div></div>
+            <span class="xp-text" id="xp-text">0 XP</span>
+          </div>
+          <div class="profile-stats" id="profile-stats"></div>
+        </div>
+
+        <div class="menu-buttons">
+          <button class="btn btn-primary" id="btn-play">▶ Play Ranked</button>
+          <button class="btn" id="btn-how">How to Play</button>
+          <button class="btn btn-ghost" id="btn-reset">Reset Progress</button>
+        </div>
+      </section>
+
+      <!-- ============ HOW TO PLAY ============ -->
+      <section id="screen-how" class="screen">
+        <h2>How to Play</h2>
+        <div class="how-grid">
+          <div class="how-card">
+            <h3>The Duel</h3>
+            <p>
+              You and your opponent trade turns. The <b>attacker</b> commits a
+              direction. The <b>defender</b> moves their head.
+            </p>
+            <p><b class="hit">Same direction → HIT.</b> <b class="dodge">Different → DODGE.</b></p>
+            <p>It's a four-way mind game: don't be where the punch lands.</p>
+          </div>
+          <div class="how-card">
+            <h3>Controls</h3>
+            <p><b>Camera:</b> move your head up / down / left / right.</p>
+            <p><b>Keyboard:</b> arrow keys or W A S D.</p>
+            <p>Hold a direction to lock it in. Stay centered and you'll get hit.</p>
+          </div>
+          <div class="how-card">
+            <h3>Abilities</h3>
+            <ul id="how-abilities"></ul>
+          </div>
+        </div>
+        <button class="btn" data-goto="menu">← Back</button>
+      </section>
+
+      <!-- ============ SETUP ============ -->
+      <section id="screen-setup" class="screen">
+        <h2>Match Setup</h2>
+
+        <div class="setup-block">
+          <h3>Input</h3>
+          <div class="choice-row" id="mode-row">
+            <button class="choice" data-mode="camera">📷 Camera (head tracking)</button>
+            <button class="choice" data-mode="keyboard">⌨️ Keyboard</button>
+          </div>
+          <p class="hint" id="mode-hint"></p>
+        </div>
+
+        <div class="setup-block">
+          <h3>Ability <small>(choose one)</small></h3>
+          <div class="choice-row wrap" id="ability-row"></div>
+        </div>
+
+        <div class="setup-block">
+          <h3>Arena</h3>
+          <div class="choice-row wrap" id="arena-row"></div>
+        </div>
+
+        <div class="setup-actions">
+          <button class="btn" data-goto="menu">← Back</button>
+          <button class="btn btn-primary" id="btn-start" disabled>Start Match</button>
+        </div>
+      </section>
+
+      <!-- ============ CALIBRATE (camera only) ============ -->
+      <section id="screen-calibrate" class="screen">
+        <h2>Calibrate</h2>
+        <p class="hint">
+          Face the camera, hold your head comfortably centered, then calibrate.
+          During the match, lean / turn your head to dodge.
+        </p>
+        <div class="calib-stage">
+          <video id="calib-video" autoplay playsinline muted></video>
+          <div class="calib-reticle" id="calib-reticle"></div>
+          <div class="calib-crosshair"></div>
+        </div>
+        <p class="calib-status" id="calib-status">Starting camera…</p>
+        <div class="setup-actions">
+          <button class="btn" data-goto="setup">← Back</button>
+          <button class="btn btn-primary" id="btn-calibrate" disabled>Calibrate &amp; Fight</button>
+        </div>
+      </section>
+
+      <!-- ============ GAME ============ -->
+      <section id="screen-game" class="screen">
+        <div class="topbar">
+          <div class="fighter-hp left">
+            <span class="fighter-name">You</span>
+            <div class="hearts" id="hp-you"></div>
+          </div>
+          <div class="turn-meta">
+            <span id="rank-pill" class="pill"></span>
+            <span id="turn-counter" class="pill ghost">Turn 1</span>
+          </div>
+          <div class="fighter-hp right">
+            <span class="fighter-name" id="opp-name">Rival</span>
+            <div class="hearts" id="hp-opp"></div>
+          </div>
+        </div>
+
+        <div class="stage" id="stage">
+          <video id="game-video" autoplay playsinline muted></video>
+          <div class="opponent" id="opponent">🥊</div>
+
+          <div class="indicator-pad">
+            <div class="arrow up" data-dir="up">▲</div>
+            <div class="arrow down" data-dir="down">▼</div>
+            <div class="arrow left" data-dir="left">◀</div>
+            <div class="arrow right" data-dir="right">▶</div>
+            <div class="reticle" id="reticle"></div>
+          </div>
+
+          <svg class="timer-ring" id="timer-ring" viewBox="0 0 120 120">
+            <circle class="timer-track" cx="60" cy="60" r="54" />
+            <circle class="timer-prog" id="timer-prog" cx="60" cy="60" r="54" />
+          </svg>
+
+          <div class="banner" id="banner">
+            <span class="banner-role" id="banner-role">READY</span>
+            <span class="banner-sub" id="banner-sub"></span>
+          </div>
+
+          <div class="flash" id="flash"></div>
+        </div>
+
+        <div class="actionbar">
+          <button class="btn ability-btn" id="ability-btn" hidden></button>
+          <span class="action-hint" id="action-hint"></span>
+          <button class="btn btn-ghost" id="btn-quit">Quit</button>
+        </div>
+      </section>
+
+      <!-- ============ RESULT ============ -->
+      <section id="screen-result" class="screen">
+        <h2 id="result-title">Victory</h2>
+        <p id="result-sub" class="result-sub"></p>
+        <div class="result-stats" id="result-stats"></div>
+        <div class="xp-gain" id="xp-gain"></div>
+        <div class="unlocks" id="unlocks"></div>
+        <div class="setup-actions">
+          <button class="btn" data-goto="menu">Menu</button>
+          <button class="btn btn-primary" id="btn-rematch">Rematch</button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

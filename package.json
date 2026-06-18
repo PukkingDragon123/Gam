@@ -1,0 +1,14 @@
+{
+  "name": "shadow-boxing-ultimate",
+  "version": "0.1.0",
+  "description": "A competitive camera-tracking head-movement boxing game — read, react, predict.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "python3 -m http.server 8000",
+    "serve": "python3 -m http.server 8000"
+  },
+  "keywords": ["game", "webcam", "face-tracking", "mediapipe", "boxing"],
+  "license": "MIT",
+  "private": true
+}
