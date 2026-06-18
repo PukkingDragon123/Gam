@@ -74,17 +74,17 @@
         <h2>Match Setup</h2>
 
         <div class="setup-block">
+          <h3>Fighter <small>— your skill comes from them</small></h3>
+          <div class="char-grid" id="character-row"></div>
+        </div>
+
+        <div class="setup-block">
           <h3>Input</h3>
           <div class="choice-row" id="mode-row">
             <button class="choice" data-mode="camera">📷 Camera (head tracking)</button>
             <button class="choice" data-mode="keyboard">⌨️ Keyboard</button>
           </div>
           <p class="hint" id="mode-hint"></p>
-        </div>
-
-        <div class="setup-block">
-          <h3>Ability <small>(choose one)</small></h3>
-          <div class="choice-row wrap" id="ability-row"></div>
         </div>
 
         <div class="setup-block">
@@ -120,23 +120,33 @@
       <!-- ============ GAME ============ -->
       <section id="screen-game" class="screen">
         <div class="topbar">
-          <div class="fighter-hp left">
-            <span class="fighter-name">You</span>
-            <div class="hearts" id="hp-you"></div>
+          <div class="nameplate left" id="np-you">
+            <div class="np-avatar" id="you-avatar">🥷</div>
+            <div class="np-info">
+              <span class="np-name" id="you-name">You</span>
+              <div class="hearts" id="hp-you"></div>
+            </div>
+            <div class="skill-badge" id="you-skill"></div>
           </div>
           <div class="turn-meta">
             <span id="rank-pill" class="pill"></span>
             <span id="turn-counter" class="pill ghost">Turn 1</span>
           </div>
-          <div class="fighter-hp right">
-            <span class="fighter-name" id="opp-name">Rival</span>
-            <div class="hearts" id="hp-opp"></div>
+          <div class="nameplate right" id="np-opp">
+            <div class="skill-badge" id="opp-skill"></div>
+            <div class="np-info">
+              <span class="np-name" id="opp-name">Rival</span>
+              <div class="hearts" id="hp-opp"></div>
+            </div>
+            <div class="np-avatar" id="opp-avatar">🤖</div>
           </div>
         </div>
 
         <div class="stage" id="stage">
           <video id="game-video" autoplay playsinline muted></video>
-          <div class="opponent" id="opponent">🥊</div>
+          <div class="opponent" id="opponent">🤖</div>
+          <div class="combo" id="combo" hidden></div>
+          <div class="countdown" id="countdown" aria-hidden="true"></div>
 
           <div class="indicator-pad">
             <div class="arrow up" data-dir="up">▲</div>

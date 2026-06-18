@@ -59,9 +59,16 @@ export class Ai {
    * @returns {{ dir: string, abilities: string[] }}
    */
   decideAttack(info) {
+    // Mid-combo, the AI tends to repeat its last hit to grow the chain — which
+    // makes it readable. The human can dodge the repeat to break the combo.
+    const repeating = info.lastHitDir && this.rng() < 0.7 - this.skill * 0.15;
     const predictedDodge = predict(this.humanDodges, this.rng);
     const onRead = this.rng() < this.skill;
-    const dir = onRead ? predictedDodge : pick(DIRECTIONS, this.rng);
+    const dir = repeating
+      ? info.lastHitDir
+      : onRead
+        ? predictedDodge
+        : pick(DIRECTIONS, this.rng);
 
     const abilities = [];
     if (info.canUseAbility) {

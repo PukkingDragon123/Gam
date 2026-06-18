@@ -2,7 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ABILITY, OPPOSITE, RESULT, TIME_MOD } from '../src/constants.js';
+import { ABILITY, ABILITIES, OPPOSITE, RESULT, TIME_MOD } from '../src/constants.js';
+import {
+  CHARACTERS,
+  getCharacter,
+  unlockedCharacters,
+  randomCharacter,
+} from '../src/characters.js';
 import { resolveExchange, makeTurnContext, applyAbility, isDefeated } from '../src/rules.js';
 import { Match } from '../src/match.js';
 import { Ai } from '../src/ai.js';
@@ -176,4 +182,66 @@ test('progression: rank and ability gating track xp', () => {
   assert.equal(rankForXp(160).id, 'bronze');
   assert.ok(!unlockedAbilities(0).includes(ABILITY.REVERSE));
   assert.ok(unlockedAbilities(300).includes(ABILITY.REVERSE));
+});
+
+test('progression: combo peak adds xp', () => {
+  // 20 match + 3*8 hits + 0 dodges + (3-1)*6 combo + 0 win
+  assert.equal(xpForMatch({ won: false, hitsLanded: 3, dodges: 0, maxCombo: 3 }), 56);
+});
+
+/* ----------------------------- combos ----------------------------- */
+
+test('combo: landing a hit keeps you on the attack', () => {
+  const m = freshMatch({ startingHp: 9 });
+  m.beginTurn({ attackDir: 'up' });
+  const s = m.resolveTurn('up');
+  assert.equal(s.result, RESULT.HIT);
+  assert.equal(s.comboContinues, true);
+  assert.equal(m.attackerIndex, 0);
+  assert.equal(m.players[0].combo, 1);
+});
+
+test('combo: grows on a repeated direction, resets on a new one', () => {
+  const m = freshMatch({ startingHp: 9 });
+  m.beginTurn({ attackDir: 'up' });
+  m.resolveTurn('up'); // combo 1
+  m.beginTurn({ attackDir: 'up' });
+  const s2 = m.resolveTurn('up'); // same dir -> combo 2
+  assert.equal(s2.combo, 2);
+  m.beginTurn({ attackDir: 'left' });
+  m.resolveTurn('left'); // new dir -> chain restarts at 1
+  assert.equal(m.players[0].combo, 1);
+  assert.equal(m.players[0].maxCombo, 2);
+});
+
+test('combo: a dodge breaks the chain and passes the turn', () => {
+  const m = freshMatch({ startingHp: 9 });
+  m.beginTurn({ attackDir: 'up' });
+  m.resolveTurn('up'); // hit, still attacking
+  m.beginTurn({ attackDir: 'up' });
+  const s = m.resolveTurn('down'); // dodged
+  assert.equal(s.result, RESULT.DODGE);
+  assert.equal(m.players[0].combo, 0);
+  assert.equal(m.attackerIndex, 1);
+});
+
+/* ----------------------------- characters ----------------------------- */
+
+test('characters: every fighter maps to a real ability', () => {
+  for (const c of CHARACTERS) assert.ok(ABILITIES[c.ability], `${c.name} has a valid skill`);
+  assert.equal(getCharacter('dio').ability, ABILITY.FREEZE);
+});
+
+test('characters: availability follows skill unlocks', () => {
+  const starter = unlockedCharacters(0);
+  assert.ok(starter.includes('gojo')); // Blind — starter
+  assert.ok(starter.includes('saitama')); // Focus — starter
+  assert.ok(!starter.includes('dio')); // Freeze — locked at 0 xp
+  assert.ok(unlockedCharacters(100).includes('dio'));
+});
+
+test('characters: randomCharacter can exclude the player pick', () => {
+  for (let i = 0; i < 25; i++) {
+    assert.notEqual(randomCharacter('gojo').id, 'gojo');
+  }
 });

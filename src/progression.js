@@ -101,11 +101,12 @@ export function unlockedCosmetics(xp) {
  * Compute XP earned for a finished match.
  * @param {{ won: boolean, hitsLanded: number, dodges: number }} stats
  */
-export function xpForMatch({ won, hitsLanded, dodges }) {
+export function xpForMatch({ won, hitsLanded, dodges, maxCombo = 0 }) {
   return (
     XP.perMatch +
     hitsLanded * XP.perHitLanded +
     dodges * XP.perDodge +
+    Math.max(0, maxCombo - 1) * XP.perComboPeak +
     (won ? XP.winBonus : 0)
   );
 }

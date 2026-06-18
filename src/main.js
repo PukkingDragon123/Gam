@@ -9,18 +9,20 @@ import {
   getProfile,
   rankForXp,
   nextRank,
-  unlockedAbilities,
   unlockedArenas,
   ARENAS,
   recordMatch,
   resetProfile,
   setSelection,
 } from './progression.js';
+import { CHARACTERS, getCharacter, unlockedCharacters, randomCharacter } from './characters.js';
 import { Match } from './match.js';
 import { Ai } from './ai.js';
 import { KeyboardSource, CameraSource, HeadTracker } from './input.js';
 import * as ui from './ui.js';
 import * as vfx from './vfx.js';
+
+const DIR_WORD = { up: '▲ UP', down: '▼ DOWN', left: '◀ LEFT', right: '▶ RIGHT' };
 
 const HUMAN = 0;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +32,9 @@ const state = {
   profile: null,
   rank: RANKS[0],
   mode: null, // 'camera' | 'keyboard'
-  ability: null, // chosen ability id
+  character: null, // chosen fighter id
+  ability: null, // derived from the chosen fighter
+  oppChar: null, // this match's opponent fighter
   arena: 'dojo',
   source: null, // KeyboardSource | CameraSource
   match: null,
@@ -85,16 +89,17 @@ function wireMenu() {
 function openSetup() {
   refreshProfile();
   const xp = state.profile.xp;
-  const unlockedAb = unlockedAbilities(xp);
-  ui.buildAbilityChoices(unlockedAb);
+  const unlockedChars = unlockedCharacters(xp);
+  ui.buildCharacterChoices(CHARACTERS, unlockedChars);
   ui.buildArenaChoices(ARENAS, unlockedArenas(xp), state.profile.selected.arena);
 
   // Sensible defaults.
-  state.mode = CameraSource && HeadTracker.isSupported() ? 'camera' : 'keyboard';
-  state.ability = unlockedAb[0] ?? null;
+  state.mode = HeadTracker.isSupported() ? 'camera' : 'keyboard';
+  state.character = unlockedChars.includes(state.character) ? state.character : unlockedChars[0] ?? null;
+  state.ability = state.character ? getCharacter(state.character).ability : null;
   state.arena = state.profile.selected.arena ?? 'dojo';
   ui.markSelected('#mode-row', 'mode', state.mode);
-  ui.markSelected('#ability-row', 'ability', state.ability);
+  ui.markSelected('#character-row', 'char', state.character);
   ui.markSelected('#arena-row', 'arena', state.arena);
   setModeHint();
   validateStart();
@@ -123,11 +128,12 @@ function wireSetup() {
     validateStart();
   });
 
-  document.querySelector('#ability-row').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-ability]');
+  document.querySelector('#character-row').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-char]');
     if (!btn || btn.disabled) return;
-    state.ability = btn.dataset.ability;
-    ui.markSelected('#ability-row', 'ability', state.ability);
+    state.character = btn.dataset.char;
+    state.ability = getCharacter(state.character).ability;
+    ui.markSelected('#character-row', 'char', state.character);
     validateStart();
   });
 
@@ -143,7 +149,7 @@ function wireSetup() {
 }
 
 function validateStart() {
-  const ok = !!state.mode && !!state.ability;
+  const ok = !!state.mode && !!state.character;
   document.querySelector('#btn-start').disabled = !ok;
 }
 
@@ -206,11 +212,14 @@ function beginMatch() {
   state.rank = rankForXp(xp);
   const rankIndex = RANKS.findIndex((r) => r.id === state.rank.id);
   const skill = Math.min(0.9, 0.45 + rankIndex * 0.09);
-  const aiAbility = pickAiAbility();
+
+  const youChar = getCharacter(state.character);
+  const oppChar = randomCharacter(youChar.id);
+  state.oppChar = oppChar;
 
   state.match = new Match({
-    p1: { id: 'you', name: 'You', ability: state.ability },
-    p2: { id: 'rival', name: aiName(), ability: aiAbility },
+    p1: { id: 'you', name: youChar.name, ability: youChar.ability },
+    p2: { id: 'rival', name: oppChar.name, ability: oppChar.ability },
     defendTimeMs: state.rank.defendTimeMs,
     attackTimeMs: state.rank.attackTimeMs,
     startingHp: MATCH.startingHp,
@@ -219,8 +228,10 @@ function beginMatch() {
 
   ui.setArena(state.arena);
   ui.setCameraVisible(state.mode === 'camera');
-  ui.setOpponentName(state.match.players[1].name);
+  ui.setFighters(youChar, oppChar);
+  ui.updateSkills(youChar.ability, humanP().abilityUses, oppChar.ability, oppP().abilityUses);
   ui.renderHp(humanP(), oppP());
+  ui.clearCombo();
   ui.clearArrows();
   ui.showAim(null);
   ui.setReticleDir('center');
@@ -233,16 +244,6 @@ function beginMatch() {
   }
 
   gameLoop();
-}
-
-function pickAiAbility() {
-  const ids = Object.keys(ABILITIES);
-  return ids[Math.floor(Math.random() * ids.length)];
-}
-
-function aiName() {
-  const names = ['Rival', 'The Phantom', 'Vega', 'Iron Maki', 'Specter', 'Razor'];
-  return names[Math.floor(Math.random() * names.length)];
 }
 
 const humanP = () => state.match.players[HUMAN];
@@ -262,24 +263,30 @@ async function gameLoop() {
 }
 
 async function countdown() {
-  for (const n of ['3', '2', '1', 'FIGHT']) {
+  for (const n of ['3', '2', '1']) {
     if (state.aborted) return;
-    ui.setBanner(n, '');
-    if (n === 'FIGHT') {
-      vfx.flash('#46f0ff', 150, 0.5);
-      vfx.impact({ kind: 'dodge', intensity: 0.9, text: 'ファイト!' });
-    } else {
-      vfx.shake(0.12);
-      vfx.speedLines(0.25, '#ffd23d');
-    }
-    await wait(550);
+    ui.countdownTick(n, false);
+    vfx.shake(0.12);
+    vfx.speedLines(0.22, '#f3c969');
+    await wait(620);
   }
+  if (state.aborted) return;
+  ui.countdownTick('FIGHT!', true);
+  vfx.flash('#7fdcff', 150, 0.45);
+  vfx.impact({ kind: 'dodge', intensity: 1, text: 'はじめ!' });
+  await wait(650);
+  ui.countdownClear();
 }
 
 async function runTurn() {
   ui.setTurnMeta(state.rank.name, state.match.turnNumber + 1);
   ui.clearArrows();
   ui.showAim(null);
+  ui.updateSkills(humanP().ability, humanP().abilityUses, oppP().ability, oppP().abilityUses);
+  // Show the attacker's running combo (hidden below 2).
+  const atk = state.match.attacker;
+  if (atk.combo >= 2) ui.setCombo(atk.combo, atk === humanP() ? 'you' : 'opp');
+  else ui.clearCombo();
   // Match point: switch on the ゴゴゴ menacing aura when someone is one hit away.
   vfx.aura(Math.min(humanP().hp, oppP().hp) <= 1);
   const humanAttacking = state.match.attackerIndex === HUMAN;
@@ -290,7 +297,15 @@ async function runTurn() {
 /* ---- human attacks, AI defends ---- */
 async function humanAttackTurn() {
   state.armedAttack = false;
-  ui.setBanner('ATTACK', 'Aim where they WON’T be');
+  const me = humanP();
+  if (me.combo >= 1 && me.lastHitDir) {
+    // Combo: chain by repeating the SAME direction — but they may read it.
+    ui.setBanner('COMBO', `Repeat ${DIR_WORD[me.lastHitDir]} to chain!`);
+    ui.showComboHint(me.lastHitDir);
+    vfx.speedLines(0.4, '#f3c969');
+  } else {
+    ui.setBanner('ATTACK', 'Aim where they WON’T be');
+  }
   ui.setActionHint(hintFor('attack'));
   setupAbilityButton('attack');
   await wait(600);
@@ -341,6 +356,8 @@ async function humanDefendTurn() {
     ability: oppP().ability,
     hp: oppP().hp,
     oppHp: humanP().hp,
+    combo: oppP().combo,
+    lastHitDir: oppP().lastHitDir,
   });
 
   const ctx = state.match.beginTurn({
@@ -395,6 +412,9 @@ async function showResolution(summary, { attackerIsHuman }) {
   const isHit = summary.result === 'hit';
   const youLandedHit = isHit && attackerIsHuman;
   const ko = summary.gameOver;
+  const combo = summary.combo;
+
+  ui.updateSkills(humanP().ability, humanP().abilityUses, oppP().ability, oppP().abilityUses);
 
   if (isHit) {
     if (youLandedHit) ui.opponentHurt();
@@ -402,16 +422,21 @@ async function showResolution(summary, { attackerIsHuman }) {
       // Finisher: big gold impact frame + long freeze, JoJo style.
       ui.flashResult('hit', youLandedHit ? 'K.O.!' : 'DOWN!');
       vfx.aura(false);
-      await vfx.impact({ kind: 'ko', intensity: 1.7, text: 'K.O.!!' });
+      ui.clearCombo();
+      await vfx.impact({ kind: 'ko', intensity: 1.8, text: 'K.O.!!' });
     } else {
-      ui.flashResult('hit', youLandedHit ? 'HIT!' : 'OUCH!');
+      const boost = Math.min(0.7, (combo - 1) * 0.18); // bigger frames as combos grow
+      ui.flashResult('hit', youLandedHit ? (combo >= 2 ? `COMBO ×${combo}!` : 'HIT!') : 'OUCH!');
+      if (summary.comboContinues && combo >= 2) ui.setCombo(combo, attackerIsHuman ? 'you' : 'opp');
       await vfx.impact({
         kind: youLandedHit ? 'hit' : 'hurt',
-        intensity: youLandedHit ? 1.15 : 1,
+        intensity: (youLandedHit ? 1.15 : 1) + boost,
+        text: combo >= 3 ? '連撃!!' : undefined,
       });
     }
   } else {
-    // dodge (you slipped it) or block (your punch missed) — quick, no freeze.
+    // dodge (you slipped it) or block (your punch missed) — combo broken.
+    ui.clearCombo();
     ui.flashResult('dodge', attackerIsHuman ? 'BLOCKED' : 'DODGE!');
     vfx.impact({ kind: attackerIsHuman ? 'miss' : 'dodge', intensity: 0.85 });
   }
@@ -538,6 +563,8 @@ function quitMatch() {
   if (captureControls) captureControls.cancel();
   teardownSource();
   ui.timerOff();
+  ui.clearCombo();
+  ui.countdownClear();
   vfx.aura(false);
   refreshProfile();
   ui.show('menu');
@@ -562,6 +589,7 @@ function endMatch() {
     won,
     hitsLanded: you.hitsLanded,
     dodges: you.dodges,
+    maxCombo: you.maxCombo,
   });
 
   // Camera can keep running for a rematch; keyboard source is recreated.

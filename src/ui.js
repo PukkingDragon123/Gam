@@ -23,6 +23,14 @@ export function cacheDom() {
   el.stage = $('#stage');
   el.abilityBtn = $('#ability-btn');
   el.actionHint = $('#action-hint');
+  el.combo = $('#combo');
+  el.countdown = $('#countdown');
+  el.youAvatar = $('#you-avatar');
+  el.oppAvatar = $('#opp-avatar');
+  el.youName = $('#you-name');
+  el.oppName = $('#opp-name');
+  el.youSkill = $('#you-skill');
+  el.oppSkill = $('#opp-skill');
   el.arrows = {};
   for (const d of DIRECTIONS) el.arrows[d] = $(`.arrow.${d}`);
 }
@@ -59,19 +67,24 @@ export function renderHowAbilities() {
 
 /* ----------------------------- setup ----------------------------- */
 
-export function buildAbilityChoices(unlockedIds) {
-  const row = $('#ability-row');
+export function buildCharacterChoices(characters, unlockedIds) {
+  const row = $('#character-row');
   row.innerHTML = '';
-  for (const a of Object.values(ABILITIES)) {
-    const unlocked = unlockedIds.includes(a.id);
+  for (const c of characters) {
+    const ability = ABILITIES[c.ability];
+    const unlocked = unlockedIds.includes(c.id);
     const btn = document.createElement('button');
-    btn.className = 'choice' + (unlocked ? '' : ' is-locked');
-    btn.dataset.ability = a.id;
+    btn.className = 'char-card' + (unlocked ? '' : ' is-locked');
+    btn.dataset.char = c.id;
     btn.disabled = !unlocked;
+    btn.style.setProperty('--char', c.theme);
     btn.innerHTML =
-      `<span class="choice-title">${a.icon} ${a.name}` +
-      (unlocked ? '' : ' <span class="lock-tag">🔒 locked</span>') +
-      `</span><span class="choice-desc">${a.blurb} · ${a.uses} use${a.uses > 1 ? 's' : ''}</span>`;
+      `<span class="char-avatar">${c.avatar}</span>` +
+      `<span class="char-name">${c.name}</span>` +
+      `<span class="char-jp">${c.jp}</span>` +
+      `<span class="char-skill"><b>${ability.icon} ${ability.name}</b>` +
+      `<small>${c.move}</small></span>` +
+      `<span class="char-tag">${unlocked ? c.tagline : '🔒 unlock ' + ability.name}</span>`;
     row.appendChild(btn);
   }
 }
@@ -124,8 +137,67 @@ function renderHearts(sel, hp, max) {
   }
 }
 
-export function setOpponentName(name) {
-  $('#opp-name').textContent = name;
+/** Set both fighters' avatars / names and theme the arena to the opponent. */
+export function setFighters(youChar, oppChar) {
+  el.youAvatar.textContent = youChar.avatar;
+  el.youName.textContent = youChar.name;
+  el.oppAvatar.textContent = oppChar.avatar;
+  el.oppName.textContent = oppChar.name;
+  el.opponent.textContent = oppChar.avatar;
+  el.opponent.style.setProperty('--char', oppChar.theme);
+  el.stage.style.setProperty('--char', oppChar.theme);
+  document.getElementById('np-you').style.setProperty('--char', youChar.theme);
+  document.getElementById('np-opp').style.setProperty('--char', oppChar.theme);
+}
+
+/** Render the skill badges (icon + remaining-use pips) for both fighters. */
+export function updateSkills(youAbility, youUses, oppAbility, oppUses) {
+  renderSkill(el.youSkill, youAbility, youUses);
+  renderSkill(el.oppSkill, oppAbility, oppUses);
+}
+
+function renderSkill(node, abilityId, uses) {
+  const a = ABILITIES[abilityId];
+  if (!a) {
+    node.innerHTML = '';
+    return;
+  }
+  const pips = Array.from({ length: a.uses }, (_, i) =>
+    i < uses ? '<i class="pip on"></i>' : '<i class="pip"></i>'
+  ).join('');
+  node.innerHTML = `<span class="skill-ico" title="${a.name}">${a.icon}</span><span class="pips">${pips}</span>`;
+  node.classList.toggle('spent', uses <= 0);
+}
+
+export function setCombo(n, who = 'you') {
+  if (n < 2) return clearCombo();
+  el.combo.hidden = false;
+  el.combo.className = `combo show ${who}` + (n >= 3 ? ' big' : '');
+  el.combo.innerHTML =
+    `<span class="combo-x">COMBO</span><span class="combo-n">×${n}</span>` +
+    (n >= 3 ? '<span class="combo-jp">連撃!</span>' : '');
+  // restart pop animation
+  void el.combo.offsetWidth;
+  el.combo.classList.add('pulse');
+}
+
+export function clearCombo() {
+  el.combo.hidden = true;
+  el.combo.className = 'combo';
+  el.combo.innerHTML = '';
+}
+
+/** Big 3-2-1-FIGHT indicator. Pass isFinal for the FIGHT! styling. */
+export function countdownTick(text, isFinal = false) {
+  el.countdown.textContent = text;
+  el.countdown.className = 'countdown show' + (isFinal ? ' final' : '');
+  void el.countdown.offsetWidth; // restart animation
+  el.countdown.classList.add('go');
+}
+
+export function countdownClear() {
+  el.countdown.className = 'countdown';
+  el.countdown.textContent = '';
 }
 
 export function setTurnMeta(rankName, turn) {
@@ -150,6 +222,11 @@ export function showTelegraph(dir) {
 
 export function showAim(dir) {
   for (const d of DIRECTIONS) el.arrows[d].classList.toggle('aim', d === dir);
+}
+
+/** Highlight the direction to repeat to extend a combo. */
+export function showComboHint(dir) {
+  for (const d of DIRECTIONS) el.arrows[d].classList.toggle('combo-hint', d === dir);
 }
 
 /** Position the reticle from a normalized offset (camera) or a direction. */
@@ -225,6 +302,7 @@ export function renderResult({ won, you, summaryUnlocks, xpGained }) {
   $('#result-stats').innerHTML =
     statBlock(you.hitsLanded, 'Hits landed') +
     statBlock(you.dodges, 'Dodges') +
+    statBlock(`×${you.maxCombo}`, 'Best combo') +
     statBlock(you.hp, 'HP left');
   $('#xp-gain').innerHTML = `+ <b>${xpGained}</b> XP`;
 

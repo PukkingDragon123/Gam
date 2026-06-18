@@ -35,6 +35,9 @@ export class Match {
       abilityUses: p.ability && ABILITIES[p.ability] ? ABILITIES[p.ability].uses : 0,
       hitsLanded: 0,
       dodges: 0,
+      combo: 0, // current consecutive same-direction hit streak while attacking
+      maxCombo: 0,
+      lastHitDir: null, // direction of the most recent landed hit (for chaining)
     }));
     this.attackerIndex = 0;
     this.turnNumber = 0;
@@ -114,12 +117,27 @@ export class Match {
 
     const attacker = this.attacker;
     const defender = this.defender;
+
     if (result === RESULT.HIT) {
       defender.hp = Math.max(0, defender.hp - 1);
       attacker.hitsLanded += 1;
+      // Combo grows only when you land the SAME direction again. Switching to a
+      // fresh direction (or a first hit) starts a new chain at 1.
+      attacker.combo = attacker.lastHitDir === ctx.attackDir ? attacker.combo + 1 : 1;
+      attacker.lastHitDir = ctx.attackDir;
+      attacker.maxCombo = Math.max(attacker.maxCombo, attacker.combo);
+      defender.combo = 0;
+      defender.lastHitDir = null;
     } else {
       defender.dodges += 1;
+      attacker.combo = 0;
+      attacker.lastHitDir = null;
     }
+
+    // A landed hit keeps you on the attack (combo); Double Turn forces one
+    // extra attack even on a miss.
+    const keepAttacker = result === RESULT.HIT || this._repeatAttacker;
+    this._repeatAttacker = false;
 
     const summary = {
       result,
@@ -127,12 +145,15 @@ export class Match {
       defender,
       attackDir: ctx.attackDir,
       defendDir: defendDir ?? null,
+      combo: attacker.combo,
+      comboContinues: keepAttacker && result === RESULT.HIT,
+      comboRepeatDir: result === RESULT.HIT ? ctx.attackDir : null,
       gameOver: this.isOver,
       winner: this.winner,
     };
 
     this.activeContext = null;
-    if (!this.isOver) this._advanceRole();
+    if (!this.isOver && !keepAttacker) this.attackerIndex = 1 - this.attackerIndex;
     return summary;
   }
 
@@ -154,14 +175,6 @@ export class Match {
   canUseAbility(playerIndex) {
     const p = this.players[playerIndex];
     return p.ability !== ABILITY.NONE && p.abilityUses > 0;
-  }
-
-  _advanceRole() {
-    if (this._repeatAttacker) {
-      this._repeatAttacker = false;
-      return; // same attacker keeps the role
-    }
-    this.attackerIndex = 1 - this.attackerIndex;
   }
 
   _spendCharge(player, abilityId, expectedSide) {

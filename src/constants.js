@@ -109,5 +109,6 @@ export const XP = {
   perMatch: 20, // just for showing up / completing a match
   perHitLanded: 8,
   perDodge: 4,
+  perComboPeak: 6, // per extra hit in your best combo (combo 3 = +12)
   winBonus: 40,
 };
