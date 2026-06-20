@@ -70,33 +70,65 @@
         <button class="btn" data-goto="menu">← Back</button>
       </section>
 
-      <!-- ============ SETUP ============ -->
+      <!-- ============ SETUP / CHARACTER SELECT ============ -->
       <section id="screen-setup" class="screen">
-        <h2>Match Setup</h2>
+        <h2>Select your fighter</h2>
 
-        <div class="setup-block">
-          <h3>Fighter <small>— your skill comes from them</small></h3>
-          <div class="char-grid" id="character-row"></div>
-        </div>
+        <div class="select">
+          <button class="nav-arrow" id="char-prev" type="button" aria-label="Previous fighter">‹</button>
 
-        <div class="setup-block">
-          <h3>Input</h3>
-          <div class="choice-row wrap" id="mode-row">
-            <button class="choice" data-mode="head">🙂 Head tracking</button>
-            <button class="choice" data-mode="hand">✋ Hand tracking</button>
-            <button class="choice" data-mode="keyboard">⌨️ Keyboard</button>
+          <div class="featured" id="featured">
+            <div class="featured-portrait" id="featured-portrait">
+              <span class="featured-aura"></span>
+              <video class="featured-media" id="featured-video" muted loop playsinline hidden></video>
+              <img class="featured-media" id="featured-art" alt="" hidden />
+              <span class="featured-emoji" id="featured-emoji">🌀</span>
+              <div class="featured-lock" id="featured-lock" hidden>
+                <span>🔒</span><small id="featured-lock-text"></small>
+              </div>
+            </div>
+
+            <div class="featured-detail">
+              <span class="featured-jp" id="featured-jp"></span>
+              <h3 class="featured-name" id="featured-name"></h3>
+              <p class="featured-tag" id="featured-tag"></p>
+              <div class="skill-card">
+                <span class="skill-eyebrow">Signature Skill</span>
+                <div class="skill-head">
+                  <span class="skill-ico-lg" id="skill-ico"></span>
+                  <span class="skill-titles"><b id="skill-name"></b><span id="skill-move"></span></span>
+                </div>
+                <p class="skill-desc" id="skill-desc"></p>
+                <span class="skill-meta" id="skill-meta"></span>
+              </div>
+            </div>
           </div>
-          <p class="hint" id="mode-hint"></p>
+
+          <button class="nav-arrow" id="char-next" type="button" aria-label="Next fighter">›</button>
         </div>
 
-        <div class="setup-block">
-          <h3>Arena</h3>
-          <div class="choice-row wrap" id="arena-row"></div>
+        <div class="roster" id="roster"></div>
+
+        <div class="setup-grid">
+          <div class="setup-block">
+            <h3>Input</h3>
+            <div class="choice-row wrap" id="mode-row">
+              <button class="choice" data-mode="head">🙂 Head</button>
+              <button class="choice" data-mode="hand">✋ Hand</button>
+              <button class="choice" data-mode="keyboard">⌨️ Keys</button>
+            </div>
+            <p class="hint" id="mode-hint"></p>
+          </div>
+
+          <div class="setup-block">
+            <h3>Arena</h3>
+            <div class="choice-row wrap" id="arena-row"></div>
+          </div>
         </div>
 
         <div class="setup-actions">
           <button class="btn" data-goto="menu">← Back</button>
-          <button class="btn btn-primary" id="btn-start" disabled>Start Match</button>
+          <button class="btn btn-primary" id="btn-start" disabled>Fight ▶</button>
         </div>
       </section>
 

@@ -2,6 +2,7 @@
 // main.js stays about flow, not innerHTML.
 
 import { DIRECTIONS, ABILITIES, ABILITY } from './constants.js';
+import { assetFor } from './assets.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -65,28 +66,81 @@ export function renderHowAbilities() {
     .join('');
 }
 
-/* ----------------------------- setup ----------------------------- */
+/* ----------------------------- setup / character select ----------------------------- */
 
-export function buildCharacterChoices(characters, unlockedIds) {
-  const row = $('#character-row');
+export function buildRoster(characters, unlockedIds) {
+  const row = $('#roster');
   row.innerHTML = '';
   for (const c of characters) {
-    const ability = ABILITIES[c.ability];
     const unlocked = unlockedIds.includes(c.id);
-    const btn = document.createElement('button');
-    btn.className = 'char-card' + (unlocked ? '' : ' is-locked');
-    btn.dataset.char = c.id;
-    btn.disabled = !unlocked;
-    btn.style.setProperty('--char', c.theme);
-    btn.innerHTML =
-      `<span class="char-avatar">${c.avatar}</span>` +
-      `<span class="char-name">${c.name}</span>` +
-      `<span class="char-jp">${c.jp}</span>` +
-      `<span class="char-skill"><b>${ability.icon} ${ability.name}</b>` +
-      `<small>${c.move}</small></span>` +
-      `<span class="char-tag">${unlocked ? c.tagline : '🔒 unlock ' + ability.name}</span>`;
-    row.appendChild(btn);
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'roster-cell' + (unlocked ? '' : ' is-locked');
+    cell.dataset.char = c.id;
+    cell.style.setProperty('--char', c.theme);
+    cell.innerHTML =
+      `<span class="roster-emoji">${c.avatar}</span>` +
+      (unlocked ? '' : '<span class="roster-lock">🔒</span>');
+    row.appendChild(cell);
   }
+}
+
+/** Render the big featured fighter. `dir` ('left'|'right'|'none') drives the slide. */
+export function renderFeatured(char, unlocked, lockText, dir = 'none') {
+  const a = ABILITIES[char.ability];
+  const f = $('#featured');
+  f.style.setProperty('--char', char.theme);
+  $('#featured-jp').textContent = char.jp;
+  $('#featured-name').textContent = char.name;
+  $('#featured-tag').textContent = char.tagline;
+  $('#skill-ico').textContent = a.icon;
+  $('#skill-name').textContent = a.name;
+  $('#skill-move').textContent = char.move;
+  $('#skill-desc').textContent = a.blurb;
+  $('#skill-meta').textContent =
+    `${a.uses} use${a.uses > 1 ? 's' : ''} · ${a.side === 'attack' ? 'use on attack' : 'use on defense'}`;
+
+  // Portrait media: idle video > still art > procedural emoji.
+  const asset = assetFor(char.id);
+  const vid = $('#featured-video');
+  const img = $('#featured-art');
+  const emoji = $('#featured-emoji');
+  vid.hidden = true;
+  img.hidden = true;
+  emoji.hidden = true;
+  if (asset?.video) {
+    vid.src = asset.video;
+    vid.hidden = false;
+    const p = vid.play?.();
+    if (p && p.catch) p.catch(() => {});
+  } else if (asset?.art) {
+    img.src = asset.art;
+    img.hidden = false;
+  } else {
+    emoji.textContent = char.avatar;
+    emoji.hidden = false;
+  }
+
+  const lock = $('#featured-lock');
+  lock.hidden = unlocked;
+  if (!unlocked) $('#featured-lock-text').textContent = lockText || 'Locked';
+
+  // re-trigger the slide animation
+  f.classList.remove('slide-left', 'slide-right');
+  void f.offsetWidth;
+  if (dir === 'left') f.classList.add('slide-left');
+  else if (dir === 'right') f.classList.add('slide-right');
+}
+
+/** Highlight the selected roster cell and scroll it into view. */
+export function markRoster(id) {
+  let selected = null;
+  $$('#roster .roster-cell').forEach((c) => {
+    const on = c.dataset.char === id;
+    c.classList.toggle('is-selected', on);
+    if (on) selected = c;
+  });
+  if (selected) selected.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
 
 export function buildArenaChoices(arenas, unlockedIds, selectedId) {

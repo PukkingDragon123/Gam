@@ -11,6 +11,7 @@ import {
   nextRank,
   unlockedArenas,
   ARENAS,
+  ABILITY_UNLOCKS,
   recordMatch,
   resetProfile,
   setSelection,
@@ -35,6 +36,8 @@ const state = {
   rank: RANKS[0],
   mode: null, // 'head' | 'hand' | 'keyboard'
   character: null, // chosen fighter id
+  charIndex: 0, // index into CHARACTERS (for slide navigation)
+  unlockedChars: [], // hero ids available at current XP
   ability: null, // derived from the chosen fighter
   oppChar: null, // this match's opponent fighter
   arena: 'dojo',
@@ -91,21 +94,42 @@ function wireMenu() {
 function openSetup() {
   refreshProfile();
   const xp = state.profile.xp;
-  const unlockedChars = unlockedCharacters(xp);
-  ui.buildCharacterChoices(CHARACTERS, unlockedChars);
+  state.unlockedChars = unlockedCharacters(xp);
+  ui.buildRoster(CHARACTERS, state.unlockedChars);
   ui.buildArenaChoices(ARENAS, unlockedArenas(xp), state.profile.selected.arena);
 
   // Sensible defaults.
   state.mode = state.mode || (CameraSource.isSupported() ? 'head' : 'keyboard');
-  state.character = unlockedChars.includes(state.character) ? state.character : unlockedChars[0] ?? null;
-  state.ability = state.character ? getCharacter(state.character).ability : null;
   state.arena = state.profile.selected.arena ?? 'dojo';
   ui.markSelected('#mode-row', 'mode', state.mode);
-  ui.markSelected('#character-row', 'char', state.character);
   ui.markSelected('#arena-row', 'arena', state.arena);
   setModeHint();
-  validateStart();
+
+  // Land on the current pick, else the first unlocked fighter.
+  let idx = CHARACTERS.findIndex((c) => c.id === state.character);
+  if (idx < 0) idx = CHARACTERS.findIndex((c) => state.unlockedChars.includes(c.id));
+  if (idx < 0) idx = 0;
+  selectFighter(idx, 'none');
+
   ui.show('setup');
+}
+
+function lockTextFor(char) {
+  const u = ABILITY_UNLOCKS.find((a) => a.id === char.ability);
+  return u ? `Reach ${u.minXp} XP to unlock` : 'Locked';
+}
+
+/** Move the featured fighter. dir: 'left' | 'right' | 'none' drives the slide. */
+function selectFighter(index, dir) {
+  const n = CHARACTERS.length;
+  state.charIndex = ((index % n) + n) % n;
+  const char = CHARACTERS[state.charIndex];
+  state.character = char.id;
+  state.ability = char.ability;
+  const unlocked = state.unlockedChars.includes(char.id);
+  ui.renderFeatured(char, unlocked, lockTextFor(char), dir);
+  ui.markRoster(char.id);
+  validateStart();
 }
 
 function setModeHint() {
@@ -135,13 +159,32 @@ function wireSetup() {
     validateStart();
   });
 
-  document.querySelector('#character-row').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-char]');
-    if (!btn || btn.disabled) return;
-    state.character = btn.dataset.char;
-    state.ability = getCharacter(state.character).ability;
-    ui.markSelected('#character-row', 'char', state.character);
-    validateStart();
+  document.querySelector('#roster').addEventListener('click', (e) => {
+    const cell = e.target.closest('[data-char]');
+    if (!cell) return;
+    const i = CHARACTERS.findIndex((c) => c.id === cell.dataset.char);
+    if (i >= 0) selectFighter(i, i < state.charIndex ? 'left' : 'right');
+  });
+  document
+    .querySelector('#char-prev')
+    .addEventListener('click', () => selectFighter(state.charIndex - 1, 'left'));
+  document
+    .querySelector('#char-next')
+    .addEventListener('click', () => selectFighter(state.charIndex + 1, 'right'));
+
+  // Slide left/right with the keyboard while on the select screen.
+  window.addEventListener('keydown', (e) => {
+    if (!document.getElementById('screen-setup').classList.contains('is-active')) return;
+    if (e.key === 'ArrowLeft') {
+      selectFighter(state.charIndex - 1, 'left');
+      e.preventDefault();
+    } else if (e.key === 'ArrowRight') {
+      selectFighter(state.charIndex + 1, 'right');
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      const b = document.querySelector('#btn-start');
+      if (b && !b.disabled) startFromSetup();
+    }
   });
 
   document.querySelector('#arena-row').addEventListener('click', (e) => {
@@ -156,7 +199,7 @@ function wireSetup() {
 }
 
 function validateStart() {
-  const ok = !!state.mode && !!state.character;
+  const ok = !!state.mode && !!state.character && state.unlockedChars.includes(state.character);
   document.querySelector('#btn-start').disabled = !ok;
 }
 
