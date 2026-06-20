@@ -15,10 +15,12 @@ import {
   resetProfile,
   setSelection,
 } from './progression.js';
-import { CHARACTERS, getCharacter, unlockedCharacters, randomCharacter } from './characters.js';
+import { CHARACTERS, getCharacter, unlockedCharacters, randomVillain } from './characters.js';
 import { Match } from './match.js';
 import { Ai } from './ai.js';
-import { KeyboardSource, CameraSource, HeadTracker } from './input.js';
+import { KeyboardSource, CameraSource } from './input.js';
+
+const isCameraMode = (m) => m === 'head' || m === 'hand';
 import * as ui from './ui.js';
 import * as vfx from './vfx.js';
 
@@ -31,7 +33,7 @@ const randDir = () => DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
 const state = {
   profile: null,
   rank: RANKS[0],
-  mode: null, // 'camera' | 'keyboard'
+  mode: null, // 'head' | 'hand' | 'keyboard'
   character: null, // chosen fighter id
   ability: null, // derived from the chosen fighter
   oppChar: null, // this match's opponent fighter
@@ -94,7 +96,7 @@ function openSetup() {
   ui.buildArenaChoices(ARENAS, unlockedArenas(xp), state.profile.selected.arena);
 
   // Sensible defaults.
-  state.mode = HeadTracker.isSupported() ? 'camera' : 'keyboard';
+  state.mode = state.mode || (CameraSource.isSupported() ? 'head' : 'keyboard');
   state.character = unlockedChars.includes(state.character) ? state.character : unlockedChars[0] ?? null;
   state.ability = state.character ? getCharacter(state.character).ability : null;
   state.arena = state.profile.selected.arena ?? 'dojo';
@@ -108,9 +110,14 @@ function openSetup() {
 
 function setModeHint() {
   const hint = document.querySelector('#mode-hint');
-  if (state.mode === 'camera') {
-    hint.textContent = HeadTracker.isSupported()
-      ? 'Move your head to dodge. You will calibrate before the match.'
+  const camOk = CameraSource.isSupported();
+  if (state.mode === 'head') {
+    hint.textContent = camOk
+      ? 'Move your head up / down / left / right to dodge. Calibrate first.'
+      : '⚠ Camera not available in this browser — use Keyboard.';
+  } else if (state.mode === 'hand') {
+    hint.textContent = camOk
+      ? 'Move your open hand in front of the camera to dodge. Calibrate first.'
       : '⚠ Camera not available in this browser — use Keyboard.';
   } else {
     hint.textContent = 'Use arrow keys or W A S D. Hold a direction to lock it in.';
@@ -121,7 +128,7 @@ function wireSetup() {
   document.querySelector('#mode-row').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-mode]');
     if (!btn) return;
-    if (btn.dataset.mode === 'camera' && !HeadTracker.isSupported()) return;
+    if (isCameraMode(btn.dataset.mode) && !CameraSource.isSupported()) return;
     state.mode = btn.dataset.mode;
     ui.markSelected('#mode-row', 'mode', state.mode);
     setModeHint();
@@ -174,13 +181,18 @@ function wireCalibrate() {
 
 async function enterCalibration() {
   ui.show('calibrate');
+  const isHand = state.mode === 'hand';
+  const noun = isHand ? 'hand' : 'head';
   const status = document.querySelector('#calib-status');
   const btn = document.querySelector('#btn-calibrate');
   const reticle = document.querySelector('#calib-reticle');
+  document.querySelector('#calib-instruct').textContent = isHand
+    ? 'Hold your open hand up in front of the camera, comfortably centered, then calibrate. Move it to dodge.'
+    : 'Face the camera, hold your head comfortably centered, then calibrate. Lean to dodge.';
   btn.disabled = true;
   status.textContent = 'Starting camera…';
 
-  state.source = new CameraSource();
+  state.source = new CameraSource(state.mode);
   try {
     await state.source.start(document.querySelector('#calib-video'));
   } catch (err) {
@@ -188,18 +200,18 @@ async function enterCalibration() {
     console.error(err);
     return;
   }
-  status.textContent = 'Loading face tracking…';
+  status.textContent = `Loading ${noun} tracking…`;
 
   state.source.onFrame = (st) => {
     const left = Math.max(4, Math.min(96, 50 + st.offset.dx * 140));
     const top = Math.max(4, Math.min(96, 50 + st.offset.dy * 140));
     reticle.style.left = `${left}%`;
     reticle.style.top = `${top}%`;
-    if (st.hasFace) {
+    if (st.tracked) {
       btn.disabled = false;
-      status.textContent = 'Face detected — center your head, then calibrate.';
+      status.textContent = `${isHand ? 'Hand' : 'Face'} detected — center your ${noun}, then calibrate.`;
     } else {
-      status.textContent = 'Looking for your face…';
+      status.textContent = `Looking for your ${noun}…`;
     }
   };
 }
@@ -214,7 +226,7 @@ function beginMatch() {
   const skill = Math.min(0.9, 0.45 + rankIndex * 0.09);
 
   const youChar = getCharacter(state.character);
-  const oppChar = randomCharacter(youChar.id);
+  const oppChar = randomVillain(); // the enemy is always an anime villain
   state.oppChar = oppChar;
 
   state.match = new Match({
@@ -227,7 +239,7 @@ function beginMatch() {
   state.ai = new Ai({ skill });
 
   ui.setArena(state.arena);
-  ui.setCameraVisible(state.mode === 'camera');
+  ui.setCameraVisible(isCameraMode(state.mode));
   ui.setFighters(youChar, oppChar);
   ui.updateSkills(youChar.ability, humanP().abilityUses, oppChar.ability, oppP().abilityUses);
   ui.renderHp(humanP(), oppP());
@@ -238,7 +250,7 @@ function beginMatch() {
   ui.timerOff();
   ui.show('game');
 
-  if (state.mode === 'camera') {
+  if (isCameraMode(state.mode)) {
     state.source.attachDisplay(document.querySelector('#game-video'));
     state.source.onFrame = (st) => ui.setReticleOffset(st.offset);
   }
@@ -602,13 +614,14 @@ function endMatch() {
 
 /* ---- misc copy ---- */
 function hintFor(phase) {
+  const mover = state.mode === 'hand' ? 'hand' : state.mode === 'head' ? 'head' : null;
   if (phase === 'attack') {
-    return state.mode === 'camera'
-      ? 'Lean your head toward the direction you want to punch.'
+    return mover
+      ? `Move your ${mover} toward where you want to punch.`
       : 'Press a direction to punch — same direction as their dodge = HIT.';
   }
-  return state.mode === 'camera'
-    ? 'Move your head AWAY from the incoming punch.'
+  return mover
+    ? `Move your ${mover} AWAY from the incoming punch.`
     : 'Press a direction other than the punch to dodge.';
 }
 

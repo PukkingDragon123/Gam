@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import { ABILITY, ABILITIES, OPPOSITE, RESULT, TIME_MOD } from '../src/constants.js';
 import {
   CHARACTERS,
+  VILLAINS,
   getCharacter,
   unlockedCharacters,
-  randomCharacter,
+  randomVillain,
 } from '../src/characters.js';
 import { resolveExchange, makeTurnContext, applyAbility, isDefeated } from '../src/rules.js';
 import { Match } from '../src/match.js';
@@ -228,20 +229,21 @@ test('combo: a dodge breaks the chain and passes the turn', () => {
 /* ----------------------------- characters ----------------------------- */
 
 test('characters: every fighter maps to a real ability', () => {
-  for (const c of CHARACTERS) assert.ok(ABILITIES[c.ability], `${c.name} has a valid skill`);
-  assert.equal(getCharacter('dio').ability, ABILITY.FREEZE);
+  for (const c of [...CHARACTERS, ...VILLAINS]) {
+    assert.ok(ABILITIES[c.ability], `${c.name} has a valid skill`);
+  }
+  assert.equal(getCharacter('dio').ability, ABILITY.DOUBLE); // dio is a villain now
 });
 
-test('characters: availability follows skill unlocks', () => {
+test('characters: hero availability follows skill unlocks', () => {
   const starter = unlockedCharacters(0);
   assert.ok(starter.includes('gojo')); // Blind — starter
   assert.ok(starter.includes('saitama')); // Focus — starter
-  assert.ok(!starter.includes('dio')); // Freeze — locked at 0 xp
-  assert.ok(unlockedCharacters(100).includes('dio'));
+  assert.ok(!starter.includes('todoroki')); // Freeze — locked at 0 xp
+  assert.ok(unlockedCharacters(100).includes('todoroki'));
 });
 
-test('characters: randomCharacter can exclude the player pick', () => {
-  for (let i = 0; i < 25; i++) {
-    assert.notEqual(randomCharacter('gojo').id, 'gojo');
-  }
+test('characters: the enemy is always a villain', () => {
+  const villainIds = new Set(VILLAINS.map((v) => v.id));
+  for (let i = 0; i < 25; i++) assert.ok(villainIds.has(randomVillain().id));
 });

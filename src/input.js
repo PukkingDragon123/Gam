@@ -1,7 +1,8 @@
 // Direction sources. The game loop only calls getDirection(); whether that
-// comes from a tracked head or the arrow keys is an implementation detail.
+// comes from a tracked head, a tracked hand, or the arrow keys is an
+// implementation detail.
 
-import { HeadTracker } from './tracking.js';
+import { CameraTracker } from './tracking.js';
 
 const KEY_MAP = {
   ArrowUp: 'up',
@@ -58,11 +59,16 @@ export class KeyboardSource {
   }
 }
 
-/** Camera source — thin adapter over HeadTracker. */
+/** Camera source — thin adapter over CameraTracker (head or hand). */
 export class CameraSource {
-  constructor() {
-    this.tracker = new HeadTracker();
-    this.mode = 'camera';
+  /** @param {'head'|'hand'} trackMode */
+  constructor(trackMode = 'head') {
+    this.tracker = new CameraTracker(trackMode);
+    this.mode = trackMode; // 'head' | 'hand'
+  }
+
+  static isSupported() {
+    return CameraTracker.isSupported();
   }
 
   async start(displayEl) {
@@ -98,4 +104,4 @@ export class CameraSource {
   }
 }
 
-export { HeadTracker };
+export { CameraTracker };

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
@@ -57,7 +57,8 @@
           </div>
           <div class="how-card">
             <h3>Controls</h3>
-            <p><b>Camera:</b> move your head up / down / left / right.</p>
+            <p><b>Head:</b> lean up / down / left / right.</p>
+            <p><b>Hand:</b> move your open hand in front of the camera.</p>
             <p><b>Keyboard:</b> arrow keys or W A S D.</p>
             <p>Hold a direction to lock it in. Stay centered and you'll get hit.</p>
           </div>
@@ -80,8 +81,9 @@
 
         <div class="setup-block">
           <h3>Input</h3>
-          <div class="choice-row" id="mode-row">
-            <button class="choice" data-mode="camera">📷 Camera (head tracking)</button>
+          <div class="choice-row wrap" id="mode-row">
+            <button class="choice" data-mode="head">🙂 Head tracking</button>
+            <button class="choice" data-mode="hand">✋ Hand tracking</button>
             <button class="choice" data-mode="keyboard">⌨️ Keyboard</button>
           </div>
           <p class="hint" id="mode-hint"></p>
@@ -101,9 +103,8 @@
       <!-- ============ CALIBRATE (camera only) ============ -->
       <section id="screen-calibrate" class="screen">
         <h2>Calibrate</h2>
-        <p class="hint">
+        <p class="hint" id="calib-instruct">
           Face the camera, hold your head comfortably centered, then calibrate.
-          During the match, lean / turn your head to dodge.
         </p>
         <div class="calib-stage">
           <video id="calib-video" autoplay playsinline muted></video>

@@ -1,26 +1,29 @@
-// Webcam head tracking via MediaPipe FaceLandmarker.
+// Webcam tracking via MediaPipe — head OR hand.
 //
-// The game only needs a coarse direction (up/down/left/right/center), so we
-// track the nose tip's position relative to a calibrated centre. The video is
-// mirrored like a real mirror, so the player's physical right maps to screen
-// right, which feels natural for dodging.
-//
-// MediaPipe is imported lazily the first time the camera starts, which keeps
-// keyboard mode fully offline and instant.
+// The game only needs a coarse direction (up/down/left/right/center). In head
+// mode we track the nose tip; in hand mode we track the palm. Both are measured
+// as an offset from a calibrated centre, the video is mirrored like a real
+// mirror, and MediaPipe is imported lazily so keyboard mode stays offline.
 
 const MP_VERSION = '0.10.12';
 const VISION_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.mjs`;
 const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`;
-const MODEL_URL =
+const FACE_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const HAND_MODEL =
+  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
-const NOSE_TIP = 1; // MediaPipe FaceMesh nose-tip landmark index
-const EMA = 0.45; // smoothing factor for the nose position
-const DEADZONE = 0.045; // normalized distance below which we report 'center'
+const NOSE_TIP = 1; // FaceLandmarker nose-tip index
+const PALM = 9; // HandLandmarker middle-finger MCP ≈ palm centre
 
-export class HeadTracker {
-  constructor() {
-    this.video = null; // internal detection video (offscreen, always playing)
+const EMA = 0.45; // position smoothing
+const DEADZONE = { head: 0.045, hand: 0.06 }; // hand swings wider, needs a bigger dead-zone
+
+export class CameraTracker {
+  /** @param {'head'|'hand'} mode */
+  constructor(mode = 'head') {
+    this.mode = mode;
+    this.video = null; // private offscreen detection video
     this.landmarker = null;
     this.stream = null;
     this.running = false;
@@ -28,14 +31,13 @@ export class HeadTracker {
 
     this.center = { x: 0.5, y: 0.5 };
     this.smoothed = { x: 0.5, y: 0.5 };
-    this.hasFace = false;
+    this.tracked = false; // face/hand currently detected
     this._lastVideoTime = -1;
 
     /** Optional callback(state) invoked each processed frame. */
     this.onFrame = null;
   }
 
-  /** True if the browser can plausibly run camera mode. */
   static isSupported() {
     return (
       typeof navigator !== 'undefined' &&
@@ -44,12 +46,6 @@ export class HeadTracker {
     );
   }
 
-  /**
-   * Acquire the camera and initialise the landmarker. Detection runs against a
-   * private offscreen video element so it keeps working no matter which screen
-   * (calibrate or game) is currently visible. Use attachDisplay() to mirror the
-   * feed onto a visible element.
-   */
   async start() {
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
@@ -60,31 +56,50 @@ export class HeadTracker {
     v.autoplay = true;
     v.muted = true;
     v.playsInline = true;
-    // Kept on-page but out of sight so the browser keeps decoding frames.
     v.style.cssText = 'position:fixed;width:2px;height:2px;left:-9999px;top:0;opacity:0;';
     document.body.appendChild(v);
     v.srcObject = this.stream;
     await v.play();
     this.video = v;
 
-    const { FaceLandmarker, FilesetResolver } = await import(VISION_URL);
+    const vision = await import(VISION_URL);
+    const { FaceLandmarker, HandLandmarker, FilesetResolver } = vision;
     const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
-    this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
-      runningMode: 'VIDEO',
-      numFaces: 1,
-    });
+
+    if (this.mode === 'hand') {
+      this.landmarker = await HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
+        runningMode: 'VIDEO',
+        numHands: 1,
+      });
+    } else {
+      this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+      });
+    }
 
     this.running = true;
     this._loop();
   }
 
-  /** Mirror the live camera stream onto a visible <video> element. */
   attachDisplay(videoEl) {
     if (!videoEl || !this.stream) return;
     videoEl.srcObject = this.stream;
     const p = videoEl.play();
     if (p && p.catch) p.catch(() => {});
+  }
+
+  _point(result) {
+    if (this.mode === 'hand') {
+      const hands = result?.landmarks;
+      if (hands && hands.length > 0) return hands[0][PALM];
+      return null;
+    }
+    const faces = result?.faceLandmarks;
+    if (faces && faces.length > 0) return faces[0][NOSE_TIP];
+    return null;
   }
 
   _loop() {
@@ -102,47 +117,42 @@ export class HeadTracker {
       return;
     }
 
-    const faces = result?.faceLandmarks;
-    if (faces && faces.length > 0) {
-      const nose = faces[0][NOSE_TIP];
-      // Mirror X so physical-right === screen-right.
-      const x = 1 - nose.x;
-      const y = nose.y;
-      this.smoothed.x = this.smoothed.x + (x - this.smoothed.x) * EMA;
-      this.smoothed.y = this.smoothed.y + (y - this.smoothed.y) * EMA;
-      this.hasFace = true;
+    const pt = this._point(result);
+    if (pt) {
+      const x = 1 - pt.x; // mirror so physical-right === screen-right
+      const y = pt.y;
+      this.smoothed.x += (x - this.smoothed.x) * EMA;
+      this.smoothed.y += (y - this.smoothed.y) * EMA;
+      this.tracked = true;
     } else {
-      this.hasFace = false;
+      this.tracked = false;
     }
 
     if (this.onFrame) this.onFrame(this.getState());
   }
 
-  /** Capture the current head position as the neutral centre. */
   calibrate() {
     this.center = { x: this.smoothed.x, y: this.smoothed.y };
   }
 
-  /** Offset of the head from calibrated centre, in normalized units. */
   getOffset() {
     return { dx: this.smoothed.x - this.center.x, dy: this.smoothed.y - this.center.y };
   }
 
-  /**
-   * Current coarse direction.
-   * @returns {'up'|'down'|'left'|'right'|'center'}
-   */
+  /** @returns {'up'|'down'|'left'|'right'|'center'} */
   getDirection() {
-    if (!this.hasFace) return 'center';
+    if (!this.tracked) return 'center';
     const { dx, dy } = this.getOffset();
-    if (Math.hypot(dx, dy) < DEADZONE) return 'center';
+    if (Math.hypot(dx, dy) < (DEADZONE[this.mode] ?? 0.05)) return 'center';
     if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
     return dy > 0 ? 'down' : 'up';
   }
 
   getState() {
     return {
-      hasFace: this.hasFace,
+      mode: this.mode,
+      hasFace: this.tracked, // kept for API compatibility with callers
+      tracked: this.tracked,
       direction: this.getDirection(),
       offset: this.getOffset(),
       smoothed: { ...this.smoothed },
@@ -171,3 +181,6 @@ export class HeadTracker {
     this.landmarker = null;
   }
 }
+
+// Back-compat alias (older imports referenced HeadTracker).
+export { CameraTracker as HeadTracker };
